@@ -42,6 +42,7 @@ pub const Diagnostic = struct {
     msg: []const u8,
 };
 
+/// Lexer splits its given source TOML file into tokens
 pub const Lexer = struct {
     arena: std.heap.ArenaAllocator,
     source: []const u8,
@@ -87,6 +88,8 @@ pub const Lexer = struct {
         return c;
     }
 
+    /// parseEscapeChar parses the valid escape codes allowed in TOML (i.e. those allowed in a string beginning with a
+    /// backslash)
     fn parseEscapeChar(self: *Lexer) Error!u8 {
         defer _ = self.pop() catch unreachable;
 
@@ -117,6 +120,7 @@ pub const Lexer = struct {
         }
     }
 
+    /// parseKey parses a key. A key can only contain [A-Za-z0-9-_]
     fn parseKey(self: *Lexer) Error!TokLoc {
         const loc = self.loc;
         var al = std.ArrayListUnmanaged(u8){};
@@ -146,6 +150,7 @@ pub const Lexer = struct {
         }
     }
 
+    /// skipWhitespace skips any non significant (i.e. not a newline) whitespace
     fn skipWhitespace(self: *Lexer) Error!void {
         while (true) {
             const c = try self.peek();
@@ -154,6 +159,8 @@ pub const Lexer = struct {
         }
     }
 
+    /// next gives the next token, or null if there are none left. Note that any memory returned in TokLoc (e.g. the
+    /// []const u8 array in a key/string) is only valid until the next call of next
     pub fn next(self: *Lexer) Error!?TokLoc {
         self.arena.deinit();
         self.arena = std.heap.ArenaAllocator.init(self.arena.child_allocator);
