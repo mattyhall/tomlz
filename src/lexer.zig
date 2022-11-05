@@ -116,11 +116,6 @@ pub const Lexer = struct {
         }
     }
 
-    fn parseQuotedKey(self: *Lexer) Error!TokLoc {
-        const tok = try self.parseString();
-        return TokLoc{ .loc = tok.loc, .tok = .{ .key = tok.tok.string } };
-    }
-
     fn parseKey(self: *Lexer) Error!TokLoc {
         const loc = self.loc;
         var al = std.ArrayListUnmanaged(u8){};
@@ -177,7 +172,7 @@ pub const Lexer = struct {
         switch (c) {
             '"' => {
                 _ = try self.pop();
-                return try self.parseQuotedKey();
+                return try self.parseString();
             },
             '=' => {
                 _ = try self.pop();
@@ -233,25 +228,27 @@ test "normal keys" {
     try testTokens("1234", &.{.{ .key = "1234" }});
 }
 
-test "quoted keys work" {
-    try testTokens("\"foo\"", &.{.{ .key = "foo" }});
-    try testTokens("\"!!!\"", &.{.{ .key = "!!!" }});
-    try testTokens("\"foo bar baz\"", &.{.{ .key = "foo bar baz" }});
-    try testTokens("\"foo.bar.baz\"", &.{.{ .key = "foo.bar.baz" }});
+test "quotation work" {
+    try testTokens("\"foo\"", &.{.{ .string = "foo" }});
+    try testTokens("\"!!!\"", &.{.{ .string = "!!!" }});
+    try testTokens("\"foo bar baz\"", &.{.{ .string = "foo bar baz" }});
+    try testTokens("\"foo.bar.baz\"", &.{.{ .string = "foo.bar.baz" }});
 
     try testTokens(
         \\"foo \"bar\" baz"
-    , &.{.{ .key = 
+    , &.{.{ .string = 
     \\foo "bar" baz
     }});
 
-    try testTokens("\"foo \\n bar\"", &.{.{ .key = "foo \n bar" }});
-    try testTokens("\"foo \\t bar\"", &.{.{ .key = "foo \t bar" }});
+    try testTokens("\"foo \\n bar\"", &.{.{ .string = "foo \n bar" }});
+    try testTokens("\"foo \\t bar\"", &.{.{ .string = "foo \t bar" }});
 }
 
 test "key/value" {
-    try testTokens("foo =", &.{ .{ .key = "foo" }, .equals});
-    try testTokens("foo    =", &.{ .{ .key = "foo" }, .equals});
-    try testTokens("foo \t=", &.{ .{ .key = "foo" }, .equals});
-    try testTokens("foo=", &.{ .{ .key = "foo" }, .equals});
+    try testTokens("foo = \"hi\"", &.{ .{ .key = "foo" }, .equals, .{ .string = "hi"}});
+    try testTokens("foo    = \"hi\"", &.{ .{ .key = "foo" }, .equals, .{ .string = "hi"}});
+    try testTokens("foo \t=\"hi\"", &.{ .{ .key = "foo" }, .equals, .{ .string = "hi"}});
+    try testTokens("foo=\"hi\"", &.{ .{ .key = "foo" }, .equals, .{ .string = "hi"}});
+    try testTokens("foo=\"hi\"\n", &.{ .{ .key = "foo" }, .equals, .{ .string = "hi"}, .newline});
+    try testTokens("\"foo bar baz\"=\"hi\"\n", &.{ .{ .string = "foo bar baz" }, .equals, .{ .string = "hi"}, .newline});
 }
