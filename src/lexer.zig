@@ -9,6 +9,7 @@ pub const Loc = struct {
 pub const Tok = union(enum) {
     equals,
     newline,
+    dot,
 
     key: []const u8,
 
@@ -126,7 +127,7 @@ pub const Lexer = struct {
                     else => return err,
                 }
             };
-            
+
             if ((c >= '0' and c <= '9') or (c >= 'A' and c <= 'z') or c == '-' or c == '_') {
                 _ = try self.pop();
                 try al.append(self.arena.allocator(), c);
@@ -156,7 +157,7 @@ pub const Lexer = struct {
     pub fn next(self: *Lexer) Error!?TokLoc {
         self.arena.deinit();
         self.arena = std.heap.ArenaAllocator.init(self.arena.child_allocator);
-        
+
         self.skipWhitespace() catch |err| switch (err) {
             error.eof => return null,
             else => return err,
@@ -176,11 +177,15 @@ pub const Lexer = struct {
             },
             '=' => {
                 _ = try self.pop();
-                return TokLoc { .loc = loc, .tok = .equals };
+                return TokLoc{ .loc = loc, .tok = .equals };
+            },
+            '.' => {
+                _ = try self.pop();
+                return TokLoc{ .loc = loc, .tok = .dot };
             },
             '\n' => {
                 _ = try self.pop();
-                return TokLoc { .loc = loc, .tok = .newline };
+                return TokLoc{ .loc = loc, .tok = .newline };
             },
             else => return try self.parseKey(),
         }
@@ -226,6 +231,7 @@ test "normal keys" {
     try testTokens("foo-bar", &.{.{ .key = "foo-bar" }});
     try testTokens("foo_bar", &.{.{ .key = "foo_bar" }});
     try testTokens("1234", &.{.{ .key = "1234" }});
+    try testTokens("foo.bar", &.{ .{ .key = "foo" }, .dot, .{ .key = "bar" } });
 }
 
 test "quotation work" {
@@ -245,10 +251,11 @@ test "quotation work" {
 }
 
 test "key/value" {
-    try testTokens("foo = \"hi\"", &.{ .{ .key = "foo" }, .equals, .{ .string = "hi"}});
-    try testTokens("foo    = \"hi\"", &.{ .{ .key = "foo" }, .equals, .{ .string = "hi"}});
-    try testTokens("foo \t=\"hi\"", &.{ .{ .key = "foo" }, .equals, .{ .string = "hi"}});
-    try testTokens("foo=\"hi\"", &.{ .{ .key = "foo" }, .equals, .{ .string = "hi"}});
-    try testTokens("foo=\"hi\"\n", &.{ .{ .key = "foo" }, .equals, .{ .string = "hi"}, .newline});
-    try testTokens("\"foo bar baz\"=\"hi\"\n", &.{ .{ .string = "foo bar baz" }, .equals, .{ .string = "hi"}, .newline});
+    try testTokens("foo = \"hi\"", &.{ .{ .key = "foo" }, .equals, .{ .string = "hi" } });
+    try testTokens("foo    = \"hi\"", &.{ .{ .key = "foo" }, .equals, .{ .string = "hi" } });
+    try testTokens("foo \t=\"hi\"", &.{ .{ .key = "foo" }, .equals, .{ .string = "hi" } });
+    try testTokens("foo=\"hi\"", &.{ .{ .key = "foo" }, .equals, .{ .string = "hi" } });
+    try testTokens("foo=\"hi\"\n", &.{ .{ .key = "foo" }, .equals, .{ .string = "hi" }, .newline });
+    try testTokens("\"foo bar baz\"=\"hi\"\n", &.{ .{ .string = "foo bar baz" }, .equals, .{ .string = "hi" }, .newline });
+    try testTokens("foo.bar=\"hi\"", &.{ .{ .key = "foo" }, .dot, .{ .key = "bar" }, .equals, .{ .string = "hi" } });
 }
