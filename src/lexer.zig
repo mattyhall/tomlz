@@ -130,17 +130,17 @@ pub const Lexer = struct {
                     else => return err,
                 }
             };
-
-            if ((c >= '0' and c <= '9') or (c >= 'A' and c <= 'z') or c == '-' or c != '_') {
+            
+            if ((c >= '0' and c <= '9') or (c >= 'A' and c <= 'z') or c == '-' or c == '_') {
                 _ = try self.pop();
                 try al.append(self.arena.allocator(), c);
                 continue;
             }
 
-            if (std.mem.indexOf(u8, &.{c}, " \t\r.") == null) {
+            if (std.mem.indexOf(u8, " \t\r.=", &.{c}) == null) {
                 self.diag = Diagnostic{
                     .loc = self.loc,
-                    .msg = "expected one of '\t', '\r', ' ', '.' after a key",
+                    .msg = "expected one of '\t', '\r', ' ', '.', '=' after a key",
                 };
                 return error.unexpected_char;
             }
@@ -149,9 +149,22 @@ pub const Lexer = struct {
         }
     }
 
+    fn skipWhitespace(self: *Lexer) Error!void {
+        while (true) {
+            const c = try self.peek();
+            if (c == '\n' or !std.ascii.isSpace(c)) return;
+            _ = self.pop() catch unreachable;
+        }
+    }
+
     pub fn next(self: *Lexer) Error!?TokLoc {
         self.arena.deinit();
         self.arena = std.heap.ArenaAllocator.init(self.arena.child_allocator);
+        
+        self.skipWhitespace() catch |err| switch (err) {
+            error.eof => return null,
+            else => return err,
+        };
 
         const c = self.peek() catch |err| switch (err) {
             error.eof => return null,
@@ -162,6 +175,11 @@ pub const Lexer = struct {
             '"' => {
                 _ = try self.pop();
                 return try self.parseQuotedKey();
+            },
+            '=' => {
+                const loc = self.loc;
+                _ = try self.pop();
+                return TokLoc { .loc = loc, .tok = .equals };
             },
             else => return try self.parseKey(),
         }
@@ -180,7 +198,7 @@ fn readAllTokens(src: []const u8) ![]const Tok {
 
 fn testTokens(src: []const u8, expected: []const Tok) !void {
     var toks = try readAllTokens(src);
-    defer std.testing.allocator.free(toks);
+    defer testing.allocator.free(toks);
 
     try testing.expectEqual(expected.len, toks.len);
 
@@ -223,4 +241,11 @@ test "quoted keys work" {
 
     try testTokens("\"foo \\n bar\"", &.{.{ .key = "foo \n bar" }});
     try testTokens("\"foo \\t bar\"", &.{.{ .key = "foo \t bar" }});
+}
+
+test "key/value" {
+    try testTokens("foo =", &.{ .{ .key = "foo" }, .equals});
+    try testTokens("foo    =", &.{ .{ .key = "foo" }, .equals});
+    try testTokens("foo \t=", &.{ .{ .key = "foo" }, .equals});
+    try testTokens("foo=", &.{ .{ .key = "foo" }, .equals});
 }
