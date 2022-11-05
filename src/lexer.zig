@@ -8,6 +8,7 @@ pub const Loc = struct {
 
 pub const Tok = union(enum) {
     equals,
+    newline,
 
     key: []const u8,
 
@@ -171,15 +172,20 @@ pub const Lexer = struct {
             else => return err,
         };
 
+        const loc = self.loc;
+
         switch (c) {
             '"' => {
                 _ = try self.pop();
                 return try self.parseQuotedKey();
             },
             '=' => {
-                const loc = self.loc;
                 _ = try self.pop();
                 return TokLoc { .loc = loc, .tok = .equals };
+            },
+            '\n' => {
+                _ = try self.pop();
+                return TokLoc { .loc = loc, .tok = .newline };
             },
             else => return try self.parseKey(),
         }
