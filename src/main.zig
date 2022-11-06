@@ -12,7 +12,10 @@ pub fn main() !void {
 }
 
 test "refAllDecls" {
+    const end2end = @import("end_to_end.zig");
+
     std.testing.refAllDecls(@This());
     std.testing.refAllDecls(lexer);
     std.testing.refAllDecls(parser);
+    std.testing.refAllDecls(end2end);
 }

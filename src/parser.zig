@@ -280,6 +280,14 @@ const Parser = struct {
     }
 };
 
+pub fn parse(allocator: std.mem.Allocator, src: []const u8) !Table {
+    var lexer = Lexer{ .real = lex.Lexer.init(allocator, src) };
+    var parser = try Parser.init(allocator, lexer);
+    defer parser.deinit();
+
+    return try parser.parse();
+}
+
 const KV = struct { k: []const u8, v: Value };
 
 fn kvsToTable(kvs: []const KV) !Table {
