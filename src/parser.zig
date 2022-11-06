@@ -143,6 +143,9 @@ const Parser = struct {
         errdefer val.deinit(self.allocator);
 
         try self.current_table.insert(self.allocator, dup, val);
+        // we have errdefer'ed freeing dup and val above, so we need to remove them from current_table so we don't try
+        // to double free them when we deinit current_table
+        errdefer _ = self.current_table.table.remove(dup);
 
         self.expect(.newline, "\n") catch |err| switch (err) {
             error.eof => return,
@@ -207,16 +210,22 @@ fn expectEqualTables(expected: Table, actual: Table) !void {
     }
 }
 
-fn expectEqualParses(toks: []const lex.Tok, expected: []const KV) !void {
+fn toksToLocToks(toks: []const lex.Tok) ![]lex.TokLoc {
     const loc = lex.Loc{ .line = 1, .col = 1 };
 
     var al = std.ArrayListUnmanaged(lex.TokLoc){};
-    defer al.deinit(testing.allocator);
     for (toks) |tok| {
         try al.append(testing.allocator, .{ .tok = tok, .loc = loc });
     }
 
-    var lexer = Lexer{ .fake = .{ .toklocs = al.items } };
+    return al.items;
+}
+
+fn expectEqualParses(toks: []const lex.Tok, expected: []const KV) !void {
+    var toklocs = try toksToLocToks(toks);
+    defer testing.allocator.free(toklocs);
+
+    var lexer = Lexer{ .fake = .{ .toklocs = toklocs } };
 
     var parser = Parser{ .lexer = lexer, .allocator = testing.allocator };
     var parsed_table = try parser.parse();
@@ -228,7 +237,18 @@ fn expectEqualParses(toks: []const lex.Tok, expected: []const KV) !void {
     try expectEqualTables(expected_table, parsed_table);
 }
 
-test "default table key assignment" {
+fn expectErrorParse(toks: []const lex.Tok) !void {
+    var toklocs = try toksToLocToks(toks);
+    defer testing.allocator.free(toklocs);
+
+    var lexer = Lexer{ .fake = .{ .toklocs = toklocs } };
+    var parser = Parser{ .lexer = lexer, .allocator = testing.allocator };
+    defer parser.deinit();
+
+    try testing.expectError(error.unexpected_token, parser.parse());
+}
+
+test "default table assignment" {
     try expectEqualParses(
         &.{ .{ .key = "foo" }, .equals, .{ .string = "a" } },
         &.{.{ .k = "foo", .v = .{ .string = "a" } }},
@@ -241,4 +261,10 @@ test "default table key assignment" {
             .{ .k = "bar", .v = .{ .string = "b" } },
         },
     );
+}
+
+test "fail assignment" {
+    try expectErrorParse(&.{.equals});
+    try expectErrorParse(&.{ .{ .key = "foo" }, .newline });
+    try expectErrorParse(&.{ .{ .string = "foo" }, .equals, .{ .string = "a" }, .{ .key = "bar" }, .equals, .{ .string = "b" } });
 }
