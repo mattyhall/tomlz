@@ -18,7 +18,7 @@ pub const Tok = union(enum) {
     float: f64,
     boolean: bool,
 
-    pub fn clone(self: Tok, allocator: std.mem.Allocator) !Tok {
+    pub fn dupe(self: Tok, allocator: std.mem.Allocator) !Tok {
         return switch (self) {
             .key => |k| Tok{ .key = try allocator.dupe(u8, k) },
             .string => |k| Tok{ .string = try allocator.dupe(u8, k) },
@@ -237,7 +237,7 @@ fn readAllTokens(src: []const u8) ![]const Tok {
     var lexer = Lexer.init(testing.allocator, src);
     var al = std.ArrayListUnmanaged(Tok){};
     while (try lexer.next()) |tok_loc| {
-        try al.append(testing.allocator, try tok_loc.tok.clone(std.testing.allocator));
+        try al.append(testing.allocator, try tok_loc.tok.dupe(std.testing.allocator));
     }
 
     return al.items;
