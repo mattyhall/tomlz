@@ -81,7 +81,14 @@ const Parser = struct {
     lexer: Lexer,
     peeked: ?lex.TokLoc = null,
     diag: ?lex.Diagnostic = null,
-    current_table: Table = .{},
+    top_level_table: *Table,
+    current_table: *Table,
+
+    fn init(allocator: std.mem.Allocator, lexer: Lexer) !Parser {
+        var table = try allocator.create(Table);
+        table.* = .{};
+        return .{ .allocator = allocator, .lexer = lexer, .top_level_table = table, .current_table = table };
+    }
 
     fn peek(self: *Parser) !lex.TokLoc {
         if (self.peeked) |tokloc| return tokloc;
@@ -157,8 +164,12 @@ const Parser = struct {
         while (true) {
             const tokloc = self.pop() catch |err| switch (err) {
                 error.eof => {
-                    const table = self.current_table;
-                    self.current_table = .{};
+                    const table = self.top_level_table.*;
+                    self.allocator.destroy(self.top_level_table);
+
+                    self.top_level_table = try self.allocator.create(Table);
+                    self.top_level_table.* = .{};
+                    self.current_table = self.top_level_table;
                     return table;
                 },
                 else => return err,
@@ -179,7 +190,8 @@ const Parser = struct {
     }
 
     fn deinit(self: *Parser) void {
-        self.current_table.deinit(self.allocator);
+        self.top_level_table.deinit(self.allocator);
+        self.allocator.destroy(self.top_level_table);
     }
 };
 
@@ -227,7 +239,8 @@ fn expectEqualParses(toks: []const lex.Tok, expected: []const KV) !void {
 
     var lexer = Lexer{ .fake = .{ .toklocs = toklocs } };
 
-    var parser = Parser{ .lexer = lexer, .allocator = testing.allocator };
+    var parser = try Parser.init(testing.allocator, lexer);
+    defer parser.deinit();
     var parsed_table = try parser.parse();
     defer parsed_table.deinit(testing.allocator);
 
@@ -242,7 +255,7 @@ fn expectErrorParse(toks: []const lex.Tok) !void {
     defer testing.allocator.free(toklocs);
 
     var lexer = Lexer{ .fake = .{ .toklocs = toklocs } };
-    var parser = Parser{ .lexer = lexer, .allocator = testing.allocator };
+    var parser = try Parser.init(testing.allocator, lexer);
     defer parser.deinit();
 
     try testing.expectError(error.unexpected_token, parser.parse());
