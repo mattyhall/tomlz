@@ -30,6 +30,13 @@ pub const Table = struct {
         return try self.table.put(allocator, key, value);
     }
 
+    pub fn getOrPutTable(self: *Table, allocator: std.mem.Allocator, key: []const u8, value: Table) !*Table {
+        var v = try self.table.getOrPutValue(allocator, key, .{ .table = value });
+        if (v.value_ptr.* != .table) return error.not_table;
+
+        return &v.value_ptr.table;
+    }
+
     pub fn deinit(self: *Table, allocator: std.mem.Allocator) void {
         var it = self.table.iterator();
         while (it.next()) |entry| {
@@ -122,19 +129,54 @@ const Parser = struct {
 
     /// parseKey parses a key/value assignent to `key`, followed by either a newline or EOF
     fn parseKey(self: *Parser, loc: lex.Loc, key: []const u8) !void {
-        if (self.current_table.hasKey(key)) {
+        var dup: []const u8 = try self.allocator.dupe(u8, key);
+        errdefer self.allocator.free(dup);
+
+        const next = try self.pop();
+        switch (next.tok) {
+            .equals => {},
+            .dot => {
+                const existed = self.current_table.hasKey(dup);
+                var new = try self.current_table.getOrPutTable(self.allocator, dup, .{});
+
+                const curr = self.current_table;
+                self.current_table = new;
+
+                const key_tok = try self.pop();
+                const key_s = switch (key_tok.tok) {
+                    .key => |k| k,
+                    .string => |s| s,
+                    else => {
+                        self.diag = .{
+                            .msg = "expected key after '.'",
+                            .loc = key_tok.loc,
+                        };
+                        return error.unexpected_token;
+                    },
+                };
+                try self.parseKey(key_tok.loc, key_s);
+                self.current_table = curr;
+
+                if (existed) self.allocator.free(dup);
+
+                return;
+            },
+            else => {
+                self.diag = .{
+                    .msg = "expected '.' or '=' after key",
+                    .loc = next.loc,
+                };
+                return error.unexpected_token;
+            },
+        }
+
+        if (self.current_table.hasKey(dup)) {
             self.diag = .{
                 .msg = "key already exists",
                 .loc = loc,
             };
             return error.key_already_exists;
         }
-
-        var dup: []const u8 = try self.allocator.dupe(u8, key);
-        errdefer self.allocator.free(dup);
-
-        // TODO: parse path (e.g. 'foo.bar.baz')
-        try self.expect(.equals, "=");
 
         const tokloc = try self.pop();
         var val = switch (tokloc.tok) {
@@ -234,14 +276,7 @@ fn toksToLocToks(toks: []const lex.Tok) ![]lex.TokLoc {
 }
 
 fn expectEqualParses(toks: []const lex.Tok, expected: []const KV) !void {
-    var toklocs = try toksToLocToks(toks);
-    defer testing.allocator.free(toklocs);
-
-    var lexer = Lexer{ .fake = .{ .toklocs = toklocs } };
-
-    var parser = try Parser.init(testing.allocator, lexer);
-    defer parser.deinit();
-    var parsed_table = try parser.parse();
+    var parsed_table = try testParse(toks);
     defer parsed_table.deinit(testing.allocator);
 
     var expected_table = try kvsToTable(expected);
@@ -250,7 +285,19 @@ fn expectEqualParses(toks: []const lex.Tok, expected: []const KV) !void {
     try expectEqualTables(expected_table, parsed_table);
 }
 
-fn expectErrorParse(toks: []const lex.Tok) !void {
+fn testParse(toks: []const lex.Tok) !Table {
+    var toklocs = try toksToLocToks(toks);
+    defer testing.allocator.free(toklocs);
+
+    var lexer = Lexer{ .fake = .{ .toklocs = toklocs } };
+
+    var parser = try Parser.init(testing.allocator, lexer);
+    defer parser.deinit();
+
+    return try parser.parse();
+}
+
+fn expectErrorParse(err: anyerror, toks: []const lex.Tok) !void {
     var toklocs = try toksToLocToks(toks);
     defer testing.allocator.free(toklocs);
 
@@ -258,7 +305,7 @@ fn expectErrorParse(toks: []const lex.Tok) !void {
     var parser = try Parser.init(testing.allocator, lexer);
     defer parser.deinit();
 
-    try testing.expectError(error.unexpected_token, parser.parse());
+    try testing.expectError(err, parser.parse());
 }
 
 test "default table assignment" {
@@ -276,8 +323,47 @@ test "default table assignment" {
     );
 }
 
-test "fail assignment" {
-    try expectErrorParse(&.{.equals});
-    try expectErrorParse(&.{ .{ .key = "foo" }, .newline });
-    try expectErrorParse(&.{ .{ .string = "foo" }, .equals, .{ .string = "a" }, .{ .key = "bar" }, .equals, .{ .string = "b" } });
+test "fail: default table assignment" {
+    try expectErrorParse(error.unexpected_token, &.{.equals});
+    try expectErrorParse(error.unexpected_token, &.{ .{ .key = "foo" }, .newline });
+    try expectErrorParse(error.unexpected_token, &.{ .{ .string = "foo" }, .equals, .{ .string = "a" }, .{ .key = "bar" }, .equals, .{ .string = "b" } });
+    try expectErrorParse(error.unexpected_token, &.{ .{ .key = "foo" }, .equals, .{ .key = "a" } });
+}
+
+test "dotted assignment" {
+    // zig fmt: off
+    {
+        var table = try testParse(&.{ .{ .key = "foo"}, .dot, .{ .key = "bar" }, .equals, .{ .string = "a" }});
+        defer table.deinit(testing.allocator);
+        
+        try testing.expectEqualStrings("a", table.table.get("foo").?.table.table.get("bar").?.string);
+    }
+
+    {
+        var table = try testParse(&.{ 
+            .{ .key = "foo"}, .dot, .{ .key = "bar" }, .equals, .{ .string = "a" }, .newline,
+            .{ .key = "foo"}, .dot, .{ .key = "baz" }, .equals, .{ .string = "b" }, .newline,
+        });
+        defer table.deinit(testing.allocator);
+        try testing.expectEqualStrings("a", table.table.get("foo").?.table.table.get("bar").?.string);
+        try testing.expectEqualStrings("b", table.table.get("foo").?.table.table.get("baz").?.string);
+    }
+
+    {
+        var table = try testParse(&.{ 
+            .{ .key = "foo"}, .dot, .{ .key = "bar" }, .equals, .{ .string = "a" }, .newline,
+            .{ .key = "foo"}, .dot, .{ .string = "baz baz" }, .equals, .{ .string = "b" }, .newline,
+        });
+        defer table.deinit(testing.allocator);
+        try testing.expectEqualStrings("a", table.table.get("foo").?.table.table.get("bar").?.string);
+        try testing.expectEqualStrings("b", table.table.get("foo").?.table.table.get("baz baz").?.string);
+    }
+    // zig fmt: on
+}
+
+test "fail: dotted assignment" {
+    try expectErrorParse(error.key_already_exists, &.{
+        .{ .key = "foo" }, .dot, .{ .key = "bar" }, .equals, .{ .string = "a" }, .newline,
+        .{ .key = "foo" }, .dot, .{ .key = "bar" }, .equals, .{ .string = "b" }, .newline,
+    });
 }
