@@ -102,6 +102,7 @@ const Parser = struct {
         if (self.peeked) |tokloc| return tokloc;
 
         self.peeked = try self.lexer.next();
+        return self.peeked orelse error.eof;
     }
 
     fn pop(self: *Parser) !lex.TokLoc {
@@ -128,19 +129,21 @@ const Parser = struct {
         }
     }
 
-    /// parseKey parses a key/value assignent to `key`, followed by either a newline or EOF
-    fn parseKey(self: *Parser, loc: lex.Loc, key: []const u8) !void {
+    /// parseKey parses a potentially nested (i.e. with dots in) key and returns the table any subsequent value should
+    /// be in, alongside the final key. If any table in the path does not exist then it will create it.
+    fn parseKey(self: *Parser, key: []const u8) !struct { tbl: *Table, key: []const u8 } {
         var dup: []const u8 = try self.allocator.dupe(u8, key);
         errdefer self.allocator.free(dup);
 
-        const next = try self.pop();
+        const next = try self.peek();
         switch (next.tok) {
-            .equals => {},
+            .equals, .close_square_bracket => return .{ .tbl = self.current_table, .key = dup },
             .dot => {
+                _ = self.pop() catch unreachable;
+
                 const existed = self.current_table.hasKey(dup);
                 var new = try self.current_table.getOrPutTable(self.allocator, dup, .{});
-
-                const curr = self.current_table;
+                var curr = self.current_table;
                 self.current_table = new;
 
                 const key_tok = try self.pop();
@@ -155,23 +158,33 @@ const Parser = struct {
                         return error.unexpected_token;
                     },
                 };
-                try self.parseKey(key_tok.loc, key_s);
-                self.current_table = curr;
+                const res = try self.parseKey(key_s);
 
                 if (existed) self.allocator.free(dup);
+                self.current_table = curr;
 
-                return;
+                return res;
             },
             else => {
                 self.diag = .{
-                    .msg = "expected '.' or '=' after key",
+                    .msg = "expected '.', ']' or '=' after key",
                     .loc = next.loc,
                 };
                 return error.unexpected_token;
             },
         }
+    }
 
-        if (self.current_table.hasKey(dup)) {
+    /// parseAssignment parses a key/value assignent to `key`, followed by either a newline or EOF
+    fn parseAssignment(self: *Parser, loc: lex.Loc, key: []const u8) !void {
+        const curr = self.current_table;
+        const res = try self.parseKey(key);
+        errdefer self.allocator.free(res.key);
+        self.current_table = curr;
+
+        try self.expect(.equals, "=");
+
+        if (res.tbl.hasKey(res.key)) {
             self.diag = .{
                 .msg = "key already exists",
                 .loc = loc,
@@ -194,10 +207,10 @@ const Parser = struct {
         };
         errdefer val.deinit(self.allocator);
 
-        try self.current_table.insert(self.allocator, dup, val);
+        try res.tbl.insert(self.allocator, res.key, val);
         // we have errdefer'ed freeing dup and val above, therefore we need to remove them from current_table so we
         // don't try to double free them when we deinit current_table
-        errdefer _ = self.current_table.table.remove(dup);
+        errdefer _ = res.tbl.table.remove(res.key);
 
         self.expect(.newline, "\n") catch |err| switch (err) {
             error.eof => return,
@@ -218,13 +231,13 @@ const Parser = struct {
                 return error.unexpected_token;
             },
         };
-        const dup = try self.allocator.dupe(u8, key);
-        errdefer self.allocator.free(dup);
 
-        const old_table = self.current_table;
-        self.current_table = try self.current_table.getOrPutTable(self.allocator, dup, .{});
+        const res = try self.parseKey(key);
+        errdefer self.allocator.free(res.key);
+
+        self.current_table = try res.tbl.getOrPutTable(self.allocator, res.key, .{});
         // We've errdefer'ed freeing dup
-        errdefer _ = old_table.table.remove(dup);
+        errdefer _ = res.tbl.table.remove(res.key);
 
         try self.expect(.close_square_bracket, "]");
         try self.expect(.newline, "\n");
@@ -246,8 +259,8 @@ const Parser = struct {
             };
 
             switch (tokloc.tok) {
-                .key => |k| try self.parseKey(tokloc.loc, k),
-                .string => |s| try self.parseKey(tokloc.loc, s),
+                .key => |k| try self.parseAssignment(tokloc.loc, k),
+                .string => |s| try self.parseAssignment(tokloc.loc, s),
                 .open_square_bracket => try self.parseTableHeader(),
                 .newline => {},
                 else => {
@@ -414,7 +427,7 @@ test "table header" {
     // zig fmt: off
     {
         var table = try testParse(&.{ 
-            .open_square_bracket, .{.key="foo"}, .close_square_bracket, .newline,
+            .open_square_bracket, .{ .key="foo" }, .close_square_bracket, .newline,
             .{ .key = "bar"}, .equals, .{ .string = "a" }, .newline,
             .{ .key = "baz" }, .equals, .{ .string = "b" }, .newline,
         });
@@ -422,9 +435,10 @@ test "table header" {
         try testing.expectEqualStrings("a", table.table.get("foo").?.table.table.get("bar").?.string);
         try testing.expectEqualStrings("b", table.table.get("foo").?.table.table.get("baz").?.string);
     }
+
     {
         var table = try testParse(&.{ 
-            .open_square_bracket, .{.key="foo"}, .close_square_bracket, .newline,
+            .open_square_bracket, .{ .key="foo" }, .close_square_bracket, .newline,
             .{ .key = "bar"}, .equals, .{ .string = "a" }, .newline,
             .newline, 
             .newline, 
@@ -434,6 +448,21 @@ test "table header" {
         defer table.deinit(testing.allocator);
         try testing.expectEqualStrings("a", table.table.get("foo").?.table.table.get("bar").?.string);
         try testing.expectEqualStrings("b", table.table.get("foo").?.table.table.get("baz").?.string);
+    }
+
+    {
+        var table = try testParse(&.{ 
+            .open_square_bracket, .{ .key="foo" }, .dot, .{.key = "bar"}, .close_square_bracket, .newline,
+            .{ .key = "baz" }, .equals, .{ .string = "a" }, .newline,
+            .{ .key = "bat" }, .equals, .{ .string = "b" }, .newline,
+        });
+        defer table.deinit(testing.allocator);
+        try testing.expectEqualStrings(
+            "a", 
+            table.table.get("foo").?.table.table.get("bar").?.table.table.get("baz").?.string);
+        try testing.expectEqualStrings(
+            "b",
+            table.table.get("foo").?.table.table.get("bar").?.table.table.get("bat").?.string);
     }
     // zig fmt: on
 }
