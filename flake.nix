@@ -8,14 +8,24 @@
       url = "github:edolstra/flake-compat";
       flake = false;
     };
-    zig.url = "github:mitchellh/zig-overlay";
+    zig = {
+      url = "github:mitchellh/zig-overlay";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    zls = {
+      url = "github:zigtools/zls";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs = {self, nixpkgs, flake-utils, flake-compat, zig}:
+  outputs = {self, nixpkgs, flake-utils, flake-compat, zig, zls}:
     let
       overlays = [
         (final: prev: { 
           zigpkgs = zig.packages.${prev.system};
+        })
+        (final: prev: {
+          zlspkgs = zls.packages.${prev.system};
         })
       ];
       systems = builtins.attrNames zig.packages;
@@ -28,8 +38,8 @@
             devShell = pkgs.mkShell {
               buildInputs = (with pkgs; [
                 zigpkgs.default
+                zlspkgs.default
                 bashInteractive
-                zls
                 gdb
                 lldb
               ]);
