@@ -199,6 +199,18 @@ pub const Lexer = struct {
     }
 };
 
+pub const Fake = struct {
+    toklocs: []TokLoc,
+    index: usize = 0,
+    
+    pub fn next(self: *Fake) Lexer.Error!?TokLoc {
+        if (self.index >= self.toklocs.len) return null;
+        
+        self.index += 1;
+        return self.toklocs[self.index - 1];
+    }
+};
+
 fn readAllTokens(src: []const u8) ![]const Tok {
     var lexer = Lexer.init(testing.allocator, src);
     var al = std.ArrayListUnmanaged(Tok){};

@@ -1,6 +1,7 @@
 const std = @import("std");
 const testing = std.testing;
 const lexer = @import("lexer.zig");
+const parser = @import("parser.zig");
 
 pub fn main() !void {
     var gpa = std.heap.page_allocator;
@@ -13,4 +14,5 @@ pub fn main() !void {
 test "refAllDecls" {
     std.testing.refAllDecls(@This());
     std.testing.refAllDecls(lexer);
+    std.testing.refAllDecls(parser);
 }
