@@ -150,11 +150,33 @@ pub const Lexer = struct {
         }
     }
 
-    /// skipWhitespace skips any non significant (i.e. not a newline) whitespace
-    fn skipWhitespace(self: *Lexer) Error!void {
+    fn skipComment(self: *Lexer) Error!void {
         while (true) {
             const c = try self.peek();
+            if (c == '\n') return;
+
+            const loc = self.loc;
+            _ = self.pop() catch unreachable;
+            // From the spec: "Control characters other than tab (U+0000 to U+0008, U+000A to U+001F, U+007F) are not
+            // permitted in comments."
+            if ((c >= 0x0 and c <= 0x8) or (c >= 0xA and c <= 0x1f) or c == 0x7f) {
+                self.diag = .{ .loc = loc, .msg = "unexpected control character in comment" };
+                return error.unexpected_char;
+            }
+        }
+    }
+
+    /// skipWhitespace skips any non significant (i.e. not a newline) whitespace
+    fn skipWhitespaceAndComment(self: *Lexer) Error!void {
+        while (true) {
+            const c = try self.peek();
+            if (c == '#') {
+                _ = self.pop() catch unreachable;
+                return try self.skipComment();
+            }
+
             if (c == '\n' or !std.ascii.isSpace(c)) return;
+
             _ = self.pop() catch unreachable;
         }
     }
@@ -165,7 +187,7 @@ pub const Lexer = struct {
         self.arena.deinit();
         self.arena = std.heap.ArenaAllocator.init(self.arena.child_allocator);
 
-        self.skipWhitespace() catch |err| switch (err) {
+        self.skipWhitespaceAndComment() catch |err| switch (err) {
             error.eof => return null,
             else => return err,
         };
@@ -202,10 +224,10 @@ pub const Lexer = struct {
 pub const Fake = struct {
     toklocs: []TokLoc,
     index: usize = 0,
-    
+
     pub fn next(self: *Fake) Lexer.Error!?TokLoc {
         if (self.index >= self.toklocs.len) return null;
-        
+
         self.index += 1;
         return self.toklocs[self.index - 1];
     }
@@ -277,4 +299,10 @@ test "key/value" {
     try testTokens("foo=\"hi\"\n", &.{ .{ .key = "foo" }, .equals, .{ .string = "hi" }, .newline });
     try testTokens("\"foo bar baz\"=\"hi\"\n", &.{ .{ .string = "foo bar baz" }, .equals, .{ .string = "hi" }, .newline });
     try testTokens("foo.bar=\"hi\"", &.{ .{ .key = "foo" }, .dot, .{ .key = "bar" }, .equals, .{ .string = "hi" } });
+}
+
+test "comments" {
+    try testTokens("# foo bar baz\n", &.{.newline});
+    try testTokens("# foo bar\tbaz\n", &.{.newline});
+    try testTokens("foo # comment\n", &.{.{ .key = "foo"}, .newline});
 }

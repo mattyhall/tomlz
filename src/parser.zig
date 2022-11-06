@@ -192,8 +192,8 @@ const Parser = struct {
         errdefer val.deinit(self.allocator);
 
         try self.current_table.insert(self.allocator, dup, val);
-        // we have errdefer'ed freeing dup and val above, so we need to remove them from current_table so we don't try
-        // to double free them when we deinit current_table
+        // we have errdefer'ed freeing dup and val above, therefore we need to remove them from current_table so we
+        // don't try to double free them when we deinit current_table
         errdefer _ = self.current_table.table.remove(dup);
 
         self.expect(.newline, "\n") catch |err| switch (err) {
