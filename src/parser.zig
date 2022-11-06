@@ -205,6 +205,31 @@ const Parser = struct {
         };
     }
 
+    fn parseTableHeader(self: *Parser) !void {
+        std.debug.assert(self.current_table == self.top_level_table);
+
+        const tokloc = try self.pop();
+        const key = switch (tokloc.tok) {
+            .key => |k| k,
+            .string => |s| s,
+            else => {
+                std.debug.print("{}\n", .{tokloc});
+                self.diag = .{ .msg = "expected key inside of square brackets", .loc = tokloc.loc };
+                return error.unexpected_token;
+            },
+        };
+        const dup = try self.allocator.dupe(u8, key);
+        errdefer self.allocator.free(dup);
+
+        const old_table = self.current_table;
+        self.current_table = try self.current_table.getOrPutTable(self.allocator, dup, .{});
+        // We've errdefer'ed freeing dup
+        errdefer _ = old_table.table.remove(dup);
+
+        try self.expect(.close_square_bracket, "]");
+        try self.expect(.newline, "\n");
+    }
+
     fn parse(self: *Parser) !Table {
         while (true) {
             const tokloc = self.pop() catch |err| switch (err) {
@@ -223,6 +248,8 @@ const Parser = struct {
             switch (tokloc.tok) {
                 .key => |k| try self.parseKey(tokloc.loc, k),
                 .string => |s| try self.parseKey(tokloc.loc, s),
+                .open_square_bracket => try self.parseTableHeader(),
+                .newline => {},
                 else => {
                     self.diag = .{
                         .msg = "expected key",
@@ -381,4 +408,37 @@ test "fail: dotted assignment" {
         .{ .key = "foo" }, .dot, .{ .key = "bar" }, .equals, .{ .string = "a" }, .newline,
         .{ .key = "foo" }, .dot, .{ .key = "bar" }, .equals, .{ .string = "b" }, .newline,
     });
+}
+
+test "table header" {
+    // zig fmt: off
+    {
+        var table = try testParse(&.{ 
+            .open_square_bracket, .{.key="foo"}, .close_square_bracket, .newline,
+            .{ .key = "bar"}, .equals, .{ .string = "a" }, .newline,
+            .{ .key = "baz" }, .equals, .{ .string = "b" }, .newline,
+        });
+        defer table.deinit(testing.allocator);
+        try testing.expectEqualStrings("a", table.table.get("foo").?.table.table.get("bar").?.string);
+        try testing.expectEqualStrings("b", table.table.get("foo").?.table.table.get("baz").?.string);
+    }
+    {
+        var table = try testParse(&.{ 
+            .open_square_bracket, .{.key="foo"}, .close_square_bracket, .newline,
+            .{ .key = "bar"}, .equals, .{ .string = "a" }, .newline,
+            .newline, 
+            .newline, 
+            .newline,
+            .{ .key = "baz" }, .equals, .{ .string = "b" }, .newline,
+        });
+        defer table.deinit(testing.allocator);
+        try testing.expectEqualStrings("a", table.table.get("foo").?.table.table.get("bar").?.string);
+        try testing.expectEqualStrings("b", table.table.get("foo").?.table.table.get("baz").?.string);
+    }
+    // zig fmt: on
+}
+
+test "fail: table header" {
+    try expectErrorParse(error.eof, &.{ .open_square_bracket, .{ .key = "foo" } });
+    try expectErrorParse(error.unexpected_token, &.{ .open_square_bracket, .{ .key = "foo" }, .equals });
 }

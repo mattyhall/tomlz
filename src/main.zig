@@ -5,9 +5,9 @@ const parser = @import("parser.zig");
 
 pub fn main() !void {
     var gpa = std.heap.page_allocator;
-    var l = lexer.Lexer.init(gpa, "foo =");
+    var l = lexer.Lexer.init(gpa, "[foo]");
     while (try l.next()) |tok| {
-        std.debug.print("{}", .{tok});
+        std.debug.print("{}, ", .{tok});
     }
 }
 

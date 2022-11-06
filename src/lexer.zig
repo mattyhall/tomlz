@@ -10,6 +10,8 @@ pub const Tok = union(enum) {
     equals,
     newline,
     dot,
+    open_square_bracket,
+    close_square_bracket,
 
     key: []const u8,
 
@@ -132,16 +134,16 @@ pub const Lexer = struct {
                 }
             };
 
-            if ((c >= '0' and c <= '9') or (c >= 'A' and c <= 'z') or c == '-' or c == '_') {
+            if ((c >= '0' and c <= '9') or (c >= 'A' and c <= 'Z') or (c >= 'a' and c <= 'z') or c == '-' or c == '_') {
                 _ = try self.pop();
                 try al.append(self.arena.allocator(), c);
                 continue;
             }
 
-            if (std.mem.indexOf(u8, " \t\r.=", &.{c}) == null) {
+            if (std.mem.indexOf(u8, " \t\r.=]", &.{c}) == null) {
                 self.diag = Diagnostic{
                     .loc = self.loc,
-                    .msg = "expected one of '\t', '\r', ' ', '.', '=' after a key",
+                    .msg = "expected one of '\t', '\r', ' ', '.', '=', ']' after a key",
                 };
                 return error.unexpected_char;
             }
@@ -270,24 +272,32 @@ pub const Lexer = struct {
 
         switch (c) {
             '"' => {
-                _ = try self.pop();
+                _ = self.pop() catch unreachable;
                 return try self.parseString();
             },
             '=' => {
-                _ = try self.pop();
+                _ = self.pop() catch unreachable;
                 return TokLoc{ .loc = loc, .tok = .equals };
             },
             '.' => {
-                _ = try self.pop();
+                _ = self.pop() catch unreachable;
                 return TokLoc{ .loc = loc, .tok = .dot };
             },
             '\n' => {
-                _ = try self.pop();
+                _ = self.pop() catch unreachable;
                 return TokLoc{ .loc = loc, .tok = .newline };
             },
             '-', '+', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' => return try self.parseNumber(),
             't' => return try self.parseKeyword("rue", .{ .boolean = true }),
             'f' => return try self.parseKeyword("alse", .{ .boolean = false }),
+            '[' => {
+                _ = self.pop() catch unreachable;
+                return TokLoc{ .loc = loc, .tok = .open_square_bracket };
+            },
+            ']' => {
+                _ = self.pop() catch unreachable;
+                return TokLoc{ .loc = loc, .tok = .close_square_bracket };
+            },
             else => return try self.parseKey(),
         }
     }
@@ -404,4 +414,9 @@ test "booleans" {
     try testTokens("falsee", &.{.{ .key = "falsee" }});
     try testTokens("tr ue", &.{ .{ .key = "tr" }, .{ .key = "ue" } });
     try testTokens("fal se", &.{ .{ .key = "fal" }, .{ .key = "se" } });
+}
+
+test "square brackets" {
+    try testTokens("[]", &.{ .open_square_bracket, .close_square_bracket });
+    try testTokens("[foo]", &.{ .open_square_bracket, .{ .key = "foo" }, .close_square_bracket });
 }
