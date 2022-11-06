@@ -181,6 +181,7 @@ const Parser = struct {
         const tokloc = try self.pop();
         var val = switch (tokloc.tok) {
             .string => |s| Value{ .string = try self.allocator.dupe(u8, s) },
+            .integer => |i| Value{ .integer = i },
             else => {
                 self.diag = .{
                     .msg = "expected value type",
@@ -315,6 +316,11 @@ test "default table assignment" {
     );
 
     try expectEqualParses(
+        &.{ .{ .key = "foo" }, .equals, .{ .integer = 147 } },
+        &.{.{ .k = "foo", .v = .{ .integer = 147 } }},
+    );
+
+    try expectEqualParses(
         &.{ .{ .string = "foo" }, .equals, .{ .string = "a" }, .newline, .{ .key = "bar" }, .equals, .{ .string = "b" } },
         &.{
             .{ .k = "foo", .v = .{ .string = "a" } },
@@ -328,6 +334,7 @@ test "fail: default table assignment" {
     try expectErrorParse(error.unexpected_token, &.{ .{ .key = "foo" }, .newline });
     try expectErrorParse(error.unexpected_token, &.{ .{ .string = "foo" }, .equals, .{ .string = "a" }, .{ .key = "bar" }, .equals, .{ .string = "b" } });
     try expectErrorParse(error.unexpected_token, &.{ .{ .key = "foo" }, .equals, .{ .key = "a" } });
+    try expectErrorParse(error.unexpected_token, &.{ .{ .integer = 147 }, .equals, .{ .string = "a" } });
 }
 
 test "dotted assignment" {

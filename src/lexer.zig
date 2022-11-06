@@ -181,8 +181,61 @@ pub const Lexer = struct {
         }
     }
 
-    /// next gives the next token, or null if there are none left. Note that any memory returned in TokLoc (e.g. the
-    /// []const u8 array in a key/string) is only valid until the next call of next
+    pub fn parseNumber(self: *Lexer) Error!TokLoc {
+        var sign: i64 = 1;
+        var base: u8 = 10;
+        switch (self.peek() catch unreachable) {
+            '-' => {
+                sign = -1;
+                _ = self.pop() catch unreachable;
+            },
+            '+' => _ = self.pop() catch unreachable,
+            else => {},
+        }
+
+        var loc = self.loc;
+        var c = try self.pop();
+        if (c == '0') {
+            const radix = self.peek() catch |err| switch (err) {
+                error.eof => return TokLoc{ .tok = .{ .integer = 0 }, .loc = loc },
+                else => return err,
+            };
+            switch (radix) {
+                'b' => base = 2,
+                'o' => base = 8,
+                'x' => base = 16,
+                else => {
+                    if (std.ascii.isWhitespace(radix)) return TokLoc{ .tok = .{ .integer = 0 }, .loc = self.loc };
+
+                    self.diag = .{ .msg = "expected 'b', 'o' or 'x' after '0'", .loc = self.loc };
+                    return error.unexpected_char;
+                },
+            }
+            _ = self.pop() catch unreachable;
+        }
+
+        var i: i64 = 0;
+        while (true) {
+            var digit = std.fmt.parseInt(i64, &.{c}, base) catch {
+                self.diag = .{ .msg = "expected number", .loc = loc };
+                return error.unexpected_char;
+            };
+            i = i * base + digit;
+
+            loc = self.loc;
+            c = self.peek() catch |err| switch (err) {
+                error.eof => return TokLoc{ .tok = .{ .integer = i * sign }, .loc = loc },
+                else => return err,
+            };
+            if (std.ascii.isWhitespace(c)) return TokLoc{ .tok = .{ .integer = i * sign }, .loc = loc };
+            _ = self.pop() catch unreachable;
+        }
+    }
+
+    /// next gives the next token, or null if there are none left.
+    ///
+    /// NOTE: any memory returned in TokLoc (e.g. the []const u8 array in a key/string) is only valid until the next
+    /// call of next
     pub fn next(self: *Lexer) Error!?TokLoc {
         self.arena.deinit();
         self.arena = std.heap.ArenaAllocator.init(self.arena.child_allocator);
@@ -196,7 +249,6 @@ pub const Lexer = struct {
             error.eof => return null,
             else => return err,
         };
-
         const loc = self.loc;
 
         switch (c) {
@@ -216,6 +268,7 @@ pub const Lexer = struct {
                 _ = try self.pop();
                 return TokLoc{ .loc = loc, .tok = .newline };
             },
+            '-', '+', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' => return try self.parseNumber(),
             else => return try self.parseKey(),
         }
     }
@@ -271,7 +324,7 @@ test "normal keys" {
     try testTokens("foo", &.{.{ .key = "foo" }});
     try testTokens("foo-bar", &.{.{ .key = "foo-bar" }});
     try testTokens("foo_bar", &.{.{ .key = "foo_bar" }});
-    try testTokens("1234", &.{.{ .key = "1234" }});
+    try testTokens("1234", &.{.{ .integer = 1234 }});
     try testTokens("foo.bar", &.{ .{ .key = "foo" }, .dot, .{ .key = "bar" } });
 }
 
@@ -304,5 +357,19 @@ test "key/value" {
 test "comments" {
     try testTokens("# foo bar baz\n", &.{.newline});
     try testTokens("# foo bar\tbaz\n", &.{.newline});
-    try testTokens("foo # comment\n", &.{.{ .key = "foo"}, .newline});
+    try testTokens("foo # comment\n", &.{ .{ .key = "foo" }, .newline });
+}
+
+test "integers" {
+    try testTokens("0", &.{.{ .integer = 0 }});
+    try testTokens("147", &.{.{ .integer = 147 }});
+    try testTokens("+147", &.{.{ .integer = 147 }});
+    try testTokens("-147", &.{.{ .integer = -147 }});
+    try testTokens("0x147abc", &.{.{ .integer = 0x147abc }});
+    try testTokens("0o147", &.{.{ .integer = 0o147 }});
+    try testTokens("-0x147abc", &.{.{ .integer = -0x147abc }});
+    try testTokens("-0o147", &.{.{ .integer = -0o147 }});
+    try testTokens("+0x147abc", &.{.{ .integer = 0x147abc }});
+    try testTokens("+0o147", &.{.{ .integer = 0o147 }});
+    try testTokens("0b10010011", &.{.{.integer = 0b10010011}});
 }
