@@ -53,6 +53,7 @@ pub const Value = union(enum) {
     integer: i64,
     string: []const u8,
     table: Table,
+    boolean: bool,
 
     fn dupe(self: *const Value, allocator: std.mem.Allocator) !Value {
         return switch (self.*) {
@@ -182,6 +183,7 @@ const Parser = struct {
         var val = switch (tokloc.tok) {
             .string => |s| Value{ .string = try self.allocator.dupe(u8, s) },
             .integer => |i| Value{ .integer = i },
+            .boolean => |b| Value{ .boolean = b },
             else => {
                 self.diag = .{
                     .msg = "expected value type",
@@ -321,6 +323,11 @@ test "default table assignment" {
     );
 
     try expectEqualParses(
+        &.{ .{ .key = "foo" }, .equals, .{ .boolean = true } },
+        &.{.{ .k = "foo", .v = .{ .boolean = true } }},
+    );
+
+    try expectEqualParses(
         &.{ .{ .string = "foo" }, .equals, .{ .string = "a" }, .newline, .{ .key = "bar" }, .equals, .{ .string = "b" } },
         &.{
             .{ .k = "foo", .v = .{ .string = "a" } },
@@ -335,6 +342,7 @@ test "fail: default table assignment" {
     try expectErrorParse(error.unexpected_token, &.{ .{ .string = "foo" }, .equals, .{ .string = "a" }, .{ .key = "bar" }, .equals, .{ .string = "b" } });
     try expectErrorParse(error.unexpected_token, &.{ .{ .key = "foo" }, .equals, .{ .key = "a" } });
     try expectErrorParse(error.unexpected_token, &.{ .{ .integer = 147 }, .equals, .{ .string = "a" } });
+    try expectErrorParse(error.unexpected_token, &.{ .{ .boolean = true }, .equals, .{ .string = "a" } });
 }
 
 test "dotted assignment" {

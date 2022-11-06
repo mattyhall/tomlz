@@ -232,6 +232,23 @@ pub const Lexer = struct {
         }
     }
 
+    fn parseKeyword(self: *Lexer, rest: []const u8, tok: Tok) Error!TokLoc {
+        const loc = self.loc;
+
+        const full_len = rest.len + 1;
+        if (self.source.len - self.index < full_len) return try self.parseKey();
+        if (!std.mem.eql(u8, rest, self.source[self.index + 1 .. self.index + full_len])) return try self.parseKey();
+
+        // The character after rest must be either whitespace or an equals for this to be a keyword
+        if (self.source.len - self.index >= full_len + 1 and
+            (!std.ascii.isWhitespace(self.source[self.index + full_len])) and self.source[self.index + full_len] != '=')
+            return try self.parseKey();
+
+        self.index += full_len;
+        self.loc.col += full_len;
+        return TokLoc{ .loc = loc, .tok = tok };
+    }
+
     /// next gives the next token, or null if there are none left.
     ///
     /// NOTE: any memory returned in TokLoc (e.g. the []const u8 array in a key/string) is only valid until the next
@@ -269,6 +286,8 @@ pub const Lexer = struct {
                 return TokLoc{ .loc = loc, .tok = .newline };
             },
             '-', '+', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' => return try self.parseNumber(),
+            't' => return try self.parseKeyword("rue", .{ .boolean = true }),
+            'f' => return try self.parseKeyword("alse", .{ .boolean = false }),
             else => return try self.parseKey(),
         }
     }
@@ -371,5 +390,18 @@ test "integers" {
     try testTokens("-0o147", &.{.{ .integer = -0o147 }});
     try testTokens("+0x147abc", &.{.{ .integer = 0x147abc }});
     try testTokens("+0o147", &.{.{ .integer = 0o147 }});
-    try testTokens("0b10010011", &.{.{.integer = 0b10010011}});
+    try testTokens("0b10010011", &.{.{ .integer = 0b10010011 }});
+}
+
+test "booleans" {
+    try testTokens("true", &.{.{ .boolean = true }});
+    try testTokens("true ", &.{.{ .boolean = true }});
+    try testTokens("true=", &.{ .{ .boolean = true }, .equals });
+    try testTokens("false", &.{.{ .boolean = false }});
+    try testTokens("false ", &.{.{ .boolean = false }});
+    try testTokens("false=", &.{ .{ .boolean = false }, .equals });
+    try testTokens("truee", &.{.{ .key = "truee" }});
+    try testTokens("falsee", &.{.{ .key = "falsee" }});
+    try testTokens("tr ue", &.{ .{ .key = "tr" }, .{ .key = "ue" } });
+    try testTokens("fal se", &.{ .{ .key = "fal" }, .{ .key = "se" } });
 }
