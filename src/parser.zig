@@ -261,7 +261,10 @@ const Parser = struct {
             switch (tokloc.tok) {
                 .key => |k| try self.parseAssignment(tokloc.loc, k),
                 .string => |s| try self.parseAssignment(tokloc.loc, s),
-                .open_square_bracket => try self.parseTableHeader(),
+                .open_square_bracket => {
+                    self.current_table = self.top_level_table;
+                    try self.parseTableHeader();
+                },
                 .newline => {},
                 else => {
                     self.diag = .{
@@ -280,6 +283,7 @@ const Parser = struct {
     }
 };
 
+/// parse takes a given TOML source and returns a Table which has been allocated with the given allocator.
 pub fn parse(allocator: std.mem.Allocator, src: []const u8) !Table {
     var lexer = Lexer{ .real = lex.Lexer.init(allocator, src) };
     var parser = try Parser.init(allocator, lexer);
@@ -471,6 +475,18 @@ test "table header" {
         try testing.expectEqualStrings(
             "b",
             table.table.get("foo").?.table.table.get("bar").?.table.table.get("bat").?.string);
+    }
+
+    {
+        var table = try testParse(&.{ 
+            .open_square_bracket, .{ .key="foo" }, .close_square_bracket, .newline,
+            .{ .key = "a"}, .equals, .{ .integer = 1 }, .newline,
+            .open_square_bracket, .{ .key="bar" }, .close_square_bracket, .newline,
+            .{ .key = "b" }, .equals, .{ .integer = 2 }, .newline,
+        });
+        defer table.deinit(testing.allocator);
+        try testing.expectEqual(@as(i64, 1), table.table.get("foo").?.table.table.get("a").?.integer);
+        try testing.expectEqual(@as(i64, 2), table.table.get("bar").?.table.table.get("b").?.integer);
     }
     // zig fmt: on
 }

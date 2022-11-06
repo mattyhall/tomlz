@@ -43,12 +43,21 @@ test "snooker" {
         \\[goat]
         \\name = "Ronnie o' Sullivan"
         \\age = 42 # as of Nov 2022
+        \\[goat.triple-crowns]
+        \\worlds = 7
+        \\masters = 7
+        \\uks = 7
     ,
         \\{
         \\    "name": "snooker",
         \\    "goat": {
         \\        "name": "Ronnie o' Sullivan",
-        \\        "age": 42
+        \\        "age": 42,
+        \\        "triple-crowns": {
+        \\            "masters": 7,
+        \\            "worlds": 7,
+        \\            "uks": 7
+        \\        }
         \\    }
         \\}
     );
