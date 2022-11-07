@@ -212,6 +212,7 @@ const Parser = struct {
         }
     }
 
+    /// parseInlineArray parses a value of the form "[ <value-1>, <value-2>, ...]"
     fn parseInlineArray(self: *Parser) error{ OutOfMemory, unexpected_token, unexpected_char, eof }!Value {
         var al = std.ArrayListUnmanaged(Value){};
         errdefer {
@@ -279,6 +280,7 @@ const Parser = struct {
         };
     }
 
+    /// parseTableHeader parses "[<key>]\n" which specifies the next assignments should be in the table defined by <key>
     fn parseTableHeader(self: *Parser) !void {
         std.debug.assert(self.current_table == self.top_level_table);
 
@@ -355,6 +357,7 @@ pub fn parse(allocator: std.mem.Allocator, src: []const u8) !Table {
 
 const KV = struct { k: []const u8, v: Value };
 
+/// kvsToTable takes a slice of KVs (i.e. assignments) and returns the table they would make
 fn kvsToTable(kvs: []const KV) !Table {
     var table = Table{};
     for (kvs) |entry| {
@@ -362,6 +365,31 @@ fn kvsToTable(kvs: []const KV) !Table {
         try table.insert(testing.allocator, try testing.allocator.dupe(u8, entry.k), v);
     }
     return table;
+}
+
+/// toksToLocToks takes a slice of toks and gives them a dummy location
+fn toksToLocToks(toks: []const lex.Tok) ![]lex.TokLoc {
+    const loc = lex.Loc{ .line = 1, .col = 1 };
+
+    var al = std.ArrayListUnmanaged(lex.TokLoc){};
+    for (toks) |tok| {
+        try al.append(testing.allocator, .{ .tok = tok, .loc = loc });
+    }
+
+    return al.items;
+}
+
+/// testParse takes the given toks and parses them into a table
+fn testParse(toks: []const lex.Tok) !Table {
+    var toklocs = try toksToLocToks(toks);
+    defer testing.allocator.free(toklocs);
+
+    var lexer = Lexer{ .fake = .{ .toklocs = toklocs } };
+
+    var parser = try Parser.init(testing.allocator, lexer);
+    defer parser.deinit();
+
+    return try parser.parse();
 }
 
 fn expectEqualTables(expected: Table, actual: Table) !void {
@@ -380,17 +408,8 @@ fn expectEqualTables(expected: Table, actual: Table) !void {
     }
 }
 
-fn toksToLocToks(toks: []const lex.Tok) ![]lex.TokLoc {
-    const loc = lex.Loc{ .line = 1, .col = 1 };
-
-    var al = std.ArrayListUnmanaged(lex.TokLoc){};
-    for (toks) |tok| {
-        try al.append(testing.allocator, .{ .tok = tok, .loc = loc });
-    }
-
-    return al.items;
-}
-
+/// expectEqualParses parses toks and asserts that it gives the same value as expected, once expected is turned into a
+/// table
 fn expectEqualParses(toks: []const lex.Tok, expected: []const KV) !void {
     var parsed_table = try testParse(toks);
     defer parsed_table.deinit(testing.allocator);
@@ -401,18 +420,7 @@ fn expectEqualParses(toks: []const lex.Tok, expected: []const KV) !void {
     try expectEqualTables(expected_table, parsed_table);
 }
 
-fn testParse(toks: []const lex.Tok) !Table {
-    var toklocs = try toksToLocToks(toks);
-    defer testing.allocator.free(toklocs);
-
-    var lexer = Lexer{ .fake = .{ .toklocs = toklocs } };
-
-    var parser = try Parser.init(testing.allocator, lexer);
-    defer parser.deinit();
-
-    return try parser.parse();
-}
-
+/// expectErrorParse asserts that trying to parse toks gives err
 fn expectErrorParse(err: anyerror, toks: []const lex.Tok) !void {
     var toklocs = try toksToLocToks(toks);
     defer testing.allocator.free(toklocs);
