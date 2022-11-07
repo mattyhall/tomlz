@@ -426,6 +426,13 @@ test "booleans" {
 test "square brackets" {
     try testTokens("[]", &.{ .open_square_bracket, .close_square_bracket });
     try testTokens("[foo]", &.{ .open_square_bracket, .{ .key = "foo" }, .close_square_bracket });
+    try testTokens("[[foo]]", &.{
+        .open_square_bracket,
+        .open_square_bracket,
+        .{ .key = "foo" },
+        .close_square_bracket,
+        .close_square_bracket,
+    });
     try testTokens(
         "[1,2]",
         &.{ .open_square_bracket, .{ .integer = 1 }, .comma, .{ .integer = 2 }, .close_square_bracket },

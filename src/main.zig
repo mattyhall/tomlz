@@ -5,10 +5,22 @@ const parser = @import("parser.zig");
 
 pub fn main() !void {
     var gpa = std.heap.page_allocator;
-    var l = lexer.Lexer.init(gpa, "[foo]");
-    while (try l.next()) |tok| {
-        std.debug.print("{}, ", .{tok});
-    }
+    var table = try parser.parse(gpa,
+        \\[[foo.bar]]
+        \\a = 1
+        \\[[foo.bar]]
+        \\b = 2
+    );
+    defer table.deinit(gpa);
+
+    const e2e = @import("end_to_end.zig");
+    var json = try e2e.tableToJson(gpa, &table);
+
+    var al = std.ArrayList(u8).init(gpa);
+    defer al.deinit();
+
+    try json.jsonStringify(.{ .whitespace = .{} }, al.writer());
+    std.debug.print("{s}", .{al.items});
 }
 
 test "refAllDecls" {

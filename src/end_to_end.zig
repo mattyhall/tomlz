@@ -18,7 +18,7 @@ fn tomlValueToJson(allocator: std.mem.Allocator, v: *parser.Value) !std.json.Val
     };
 }
 
-fn tableToJson(allocator: std.mem.Allocator, table: *parser.Table) error{OutOfMemory}!std.json.Value {
+pub fn tableToJson(allocator: std.mem.Allocator, table: *parser.Table) error{OutOfMemory}!std.json.Value {
     var obj = std.json.ObjectMap.init(allocator);
     errdefer obj.deinit();
 
@@ -192,6 +192,88 @@ test "helix config" {
         \\            120
         \\        ],
         \\        "true-color": true
+        \\    }
+        \\}
+    );
+}
+
+test "cargo" {
+    try expectParseEqualToJson(
+        \\[package]
+        \\
+        \\name = "tiled"
+        \\version = "0.9.3"
+        \\description = "A rust crate for loading in maps created by the Tiled editor"
+        \\repository = "https://github.com/mattyhall/rs-tiled.git"
+        \\# documentation = "http://rust-ci.org/mattyhall/rs-tiled/doc/tiled/"
+        \\readme = "README.md"
+        \\license = "MIT"
+        \\authors = ["Matthew Hall <matthew@quickbeam.me.uk>"]
+        \\edition = "2018"
+        \\
+        \\keywords = ["tiled", "tmx", "map"]
+        \\
+        \\[features]
+        \\default = ["zstd"]
+        \\
+        \\[lib]
+        \\name = "tiled"
+        \\path = "src/lib.rs"
+        \\
+        \\[[example]]
+        \\name = "example"
+        \\path = "examples/main1.rs"
+        \\
+        \\[[example]]
+        \\name = "example"
+        \\path = "examples/main2.rs"
+        \\
+        \\[dependencies]
+        \\base64  = "0.10"
+        \\xml-rs  = "0.8"
+        \\libflate = "0.1.18"
+    ,
+        \\{
+        \\    "lib": {
+        \\        "name": "tiled",
+        \\        "path": "src/lib.rs"
+        \\    },
+        \\    "dependencies": {
+        \\        "xml-rs": "0.8",
+        \\        "base64": "0.10",
+        \\        "libflate": "0.1.18"
+        \\    },
+        \\    "features": {
+        \\        "default": [
+        \\            "zstd"
+        \\        ]
+        \\    },
+        \\    "example": [
+        \\        {
+        \\            "name": "example",
+        \\            "path": "examples/main1.rs"
+        \\        },
+        \\        {
+        \\            "name": "example",
+        \\            "path": "examples/main2.rs"
+        \\        }
+        \\    ],
+        \\    "package": {
+        \\        "name": "tiled",
+        \\        "keywords": [
+        \\            "tiled",
+        \\            "tmx",
+        \\            "map"
+        \\        ],
+        \\        "version": "0.9.3",
+        \\        "description": "A rust crate for loading in maps created by the Tiled editor",
+        \\        "authors": [
+        \\            "Matthew Hall <matthew@quickbeam.me.uk>"
+        \\        ],
+        \\        "repository": "https://github.com/mattyhall/rs-tiled.git",
+        \\        "edition": "2018",
+        \\        "readme": "README.md",
+        \\        "license": "MIT"
         \\    }
         \\}
     );
