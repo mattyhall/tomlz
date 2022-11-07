@@ -52,12 +52,18 @@ pub const Table = struct {
 pub const Value = union(enum) {
     integer: i64,
     string: []const u8,
+    array: std.ArrayListUnmanaged(Value),
     table: Table,
     boolean: bool,
 
     fn dupe(self: *const Value, allocator: std.mem.Allocator) !Value {
         return switch (self.*) {
             .string => |s| Value{ .string = try allocator.dupe(u8, s) },
+            .array => |al| b: {
+                var new = try std.ArrayListUnmanaged(Value).initCapacity(allocator, al.items.len);
+                new.appendSliceAssumeCapacity(al.items);
+                break :b Value{ .array = new };
+            },
             .table => |t| b: {
                 var new_table = Table{};
                 var it = t.table.iterator();
@@ -77,6 +83,12 @@ pub const Value = union(enum) {
     fn deinit(self: *Value, allocator: std.mem.Allocator) void {
         switch (self.*) {
             Value.table => |*t| t.deinit(allocator),
+            Value.array => |*arr| {
+                for (arr.items) |*item| {
+                    item.deinit(allocator);
+                }
+                arr.deinit(allocator);
+            },
             Value.string => |*s| allocator.free(s.*),
             else => {},
         }
@@ -175,6 +187,67 @@ const Parser = struct {
         }
     }
 
+    fn parseValue(self: *Parser) !Value {
+        const tokloc = try self.pop();
+        var val = switch (tokloc.tok) {
+            .string => |s| Value{ .string = try self.allocator.dupe(u8, s) },
+            .integer => |i| Value{ .integer = i },
+            .boolean => |b| Value{ .boolean = b },
+            .open_square_bracket => try self.parseInlineArray(),
+            else => {
+                self.diag = .{
+                    .msg = "expected value type",
+                    .loc = tokloc.loc,
+                };
+                return error.unexpected_token;
+            },
+        };
+
+        return val;
+    }
+
+    fn skipNewlines(self: *Parser) !void {
+        while ((try self.peek()).tok == .newline) {
+            _ = self.pop() catch unreachable;
+        }
+    }
+
+    fn parseInlineArray(self: *Parser) error{ OutOfMemory, unexpected_token, unexpected_char, eof }!Value {
+        var al = std.ArrayListUnmanaged(Value){};
+        errdefer {
+            for (al.items) |*item| {
+                item.deinit(self.allocator);
+            }
+            al.deinit(self.allocator);
+        }
+
+        while (true) {
+            try self.skipNewlines();
+
+            var v = try self.parseValue();
+            {
+                errdefer v.deinit(self.allocator);
+                try al.append(self.allocator, v);
+            }
+
+            try self.skipNewlines();
+
+            const tokloc = try self.pop();
+            switch (tokloc.tok) {
+                .comma => {},
+                .newline => {},
+                .close_square_bracket => return Value{ .array = al },
+                else => {
+                    self.diag = .{
+                        .msg = "expected one of '\n', ',' or ']' after list entry",
+                        .loc = tokloc.loc,
+                    };
+                    return error.unexpected_char;
+                },
+            }
+        }
+    }
+
     /// parseAssignment parses a key/value assignent to `key`, followed by either a newline or EOF
     fn parseAssignment(self: *Parser, loc: lex.Loc, key: []const u8) !void {
         const curr = self.current_table;
@@ -192,19 +265,7 @@ const Parser = struct {
             return error.key_already_exists;
         }
 
-        const tokloc = try self.pop();
-        var val = switch (tokloc.tok) {
-            .string => |s| Value{ .string = try self.allocator.dupe(u8, s) },
-            .integer => |i| Value{ .integer = i },
-            .boolean => |b| Value{ .boolean = b },
-            else => {
-                self.diag = .{
-                    .msg = "expected value type",
-                    .loc = tokloc.loc,
-                };
-                return error.unexpected_token;
-            },
-        };
+        var val = try self.parseValue();
         errdefer val.deinit(self.allocator);
 
         try res.tbl.insert(self.allocator, res.key, val);
@@ -494,4 +555,71 @@ test "table header" {
 test "fail: table header" {
     try expectErrorParse(error.eof, &.{ .open_square_bracket, .{ .key = "foo" } });
     try expectErrorParse(error.unexpected_token, &.{ .open_square_bracket, .{ .key = "foo" }, .equals });
+}
+
+test "inline array" {
+    // zig fmt: off
+    {
+        var table = try testParse(&.{.{ .key = "foo" }, .equals, 
+            .open_square_bracket, 
+                .{ .integer = 1 }, .comma, .{ .integer = 2 },
+            .close_square_bracket });
+        defer table.deinit(testing.allocator);
+
+        try testing.expectEqualSlices(Value, 
+            &.{ .{ .integer = 1 }, .{ .integer = 2 }},
+            table.table.get("foo").?.array.items);
+    }
+
+    {
+        var table = try testParse(&.{.{ .key = "foo" }, .equals, 
+            .open_square_bracket, 
+                .{ .integer = 1 }, .newline, .newline, .comma, .newline, .{ .integer = 2 },
+            .close_square_bracket });
+        defer table.deinit(testing.allocator);
+
+        try testing.expectEqualSlices(Value, 
+            &.{ .{ .integer = 1 }, .{ .integer = 2 }},
+            table.table.get("foo").?.array.items);
+    }
+    
+    {
+        var table = try testParse(&.{.{ .key = "foo" }, .equals, 
+            .open_square_bracket, 
+                .{ .integer = 1 }, .comma, .{ .string = "bar" },
+            .close_square_bracket });
+        defer table.deinit(testing.allocator);
+
+        try testing.expectEqual(@as(usize, 2), table.table.get("foo").?.array.items.len);
+        try testing.expectEqual(Value{ .integer = 1}, table.table.get("foo").?.array.items[0]);
+        try testing.expectEqualStrings("bar", table.table.get("foo").?.array.items[1].string);
+
+    }
+
+    {
+        var table = try testParse(&.{.{ .key = "foo" }, .equals, 
+            .open_square_bracket, 
+                .{ .integer = 1 }, .comma, 
+                .open_square_bracket, .{ .integer = 2 }, .comma, .{ .integer = 3 }, .close_square_bracket,
+            .close_square_bracket });
+        defer table.deinit(testing.allocator);
+
+        try testing.expectEqual(@as(usize, 2), table.table.get("foo").?.array.items.len);
+        try testing.expectEqual(Value{ .integer = 1}, table.table.get("foo").?.array.items[0]);
+        try testing.expectEqualSlices(Value, 
+            &.{ .{ .integer = 2 }, .{ .integer = 3 }},
+            table.table.get("foo").?.array.items[1].array.items);
+
+    }
+    // zig fmt: on
+}
+
+test "fail: inline array" {
+    try expectErrorParse(error.eof, &.{ .{ .key = "foo" }, .equals, .open_square_bracket });
+    try expectErrorParse(error.eof, &.{ .{ .key = "foo" }, .equals, .open_square_bracket, .{ .integer = 1 } });
+    try expectErrorParse(error.eof, &.{ .{ .key = "foo" }, .equals, .open_square_bracket, .{ .integer = 1 }, .comma });
+    try expectErrorParse(
+        error.unexpected_token,
+        &.{ .{ .key = "foo" }, .equals, .open_square_bracket, .{ .integer = 1 }, .comma, .close_square_bracket },
+    );
 }

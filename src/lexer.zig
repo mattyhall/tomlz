@@ -12,6 +12,7 @@ pub const Tok = union(enum) {
     dot,
     open_square_bracket,
     close_square_bracket,
+    comma,
 
     key: []const u8,
 
@@ -229,7 +230,9 @@ pub const Lexer = struct {
                 error.eof => return TokLoc{ .tok = .{ .integer = i * sign }, .loc = loc },
                 else => return err,
             };
-            if (std.ascii.isWhitespace(c)) return TokLoc{ .tok = .{ .integer = i * sign }, .loc = loc };
+            if (!std.ascii.isAlphanumeric(c))
+                return TokLoc{ .tok = .{ .integer = i * sign }, .loc = loc };
+
             _ = self.pop() catch unreachable;
         }
     }
@@ -297,6 +300,10 @@ pub const Lexer = struct {
             ']' => {
                 _ = self.pop() catch unreachable;
                 return TokLoc{ .loc = loc, .tok = .close_square_bracket };
+            },
+            ',' => {
+                _ = self.pop() catch unreachable;
+                return TokLoc{ .loc = loc, .tok = .comma };
             },
             else => return try self.parseKey(),
         }
@@ -419,4 +426,8 @@ test "booleans" {
 test "square brackets" {
     try testTokens("[]", &.{ .open_square_bracket, .close_square_bracket });
     try testTokens("[foo]", &.{ .open_square_bracket, .{ .key = "foo" }, .close_square_bracket });
+    try testTokens(
+        "[1,2]",
+        &.{ .open_square_bracket, .{ .integer = 1 }, .comma, .{ .integer = 2 }, .close_square_bracket },
+    );
 }
