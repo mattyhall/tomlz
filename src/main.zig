@@ -6,10 +6,25 @@ const parser = @import("parser.zig");
 pub fn main() !void {
     var gpa = std.heap.page_allocator;
     var table = try parser.parse(gpa,
-        \\[[foo]]
-        \\a = 1
-        \\[[foo]]
-        \\b = 2
+\\[[fruits]]
+\\name = "apple"
+\\
+\\[fruits.physical]  # subtable
+\\color = "red"
+\\shape = "round"
+\\
+\\[[fruits.varieties]]  # nested array of tables
+\\name = "red delicious"
+\\
+\\[[fruits.varieties]]
+\\name = "granny smith"
+\\
+\\
+\\[[fruits]]
+\\name = "banana"
+\\
+\\[[fruits.varieties]]
+\\name = "plantain"    
     );
     defer table.deinit(gpa);
 

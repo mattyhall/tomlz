@@ -276,9 +276,14 @@ const Parser = struct {
         var tbl = self.current_table;
         for (key_path) |k, i| {
             if (i == key_path.len - 1) {
-                if (tbl.hasKey(k)) {
-                    if (allow_exists)
-                        return .{ .table = tbl, .value = tbl.table.getPtr(k) orelse unreachable, .existed = true };
+                if (tbl.table.getPtr(k)) |val| {
+                    if (allow_exists) {
+                        if (val.* != .array)
+                            return .{ .table = tbl, .value = val, .existed = true };
+
+                        var tbl_in_array = &val.array.items[val.array.items.len - 1];
+                        return .{ .table = &tbl_in_array.table, .value = tbl_in_array, .existed = true };
+                    }
 
                     self.diag = .{
                         .msg = "key already exists",
@@ -297,11 +302,23 @@ const Parser = struct {
                 return .{ .table = tbl, .value = val };
             }
 
-            const existed = tbl.table.get(k) != null;
-            var dup = try self.allocator.dupe(u8, k);
-            errdefer self.allocator.free(dup);
-            tbl = try tbl.getOrPutTable(self.allocator, dup, .{});
-            if (existed) self.allocator.free(dup);
+            if (tbl.table.getPtr(k)) |val| {
+                switch (val.*) {
+                    .table => |*t| tbl = t,
+                    .array => |*a| tbl = &a.items[a.items.len - 1].table,
+                    else => {
+                        self.diag = .{
+                            .msg = "key already exists and is not a table or array",
+                            .loc = loc,
+                        };
+                        return error.not_table_or_array;
+                    },
+                }
+            } else {
+                var dup = try self.allocator.dupe(u8, k);
+                errdefer self.allocator.free(dup);
+                tbl = try tbl.getOrPutTable(self.allocator, dup, .{});
+            }
         }
 
         unreachable;
@@ -831,6 +848,39 @@ test "fail: arrays" {
 
             .open_square_bracket, .open_square_bracket, .{ .key="foo" }, .close_square_bracket, .close_square_bracket, .newline,
             .{ .key = "bar"}, .equals, .{ .string = "a" }, .newline,
+    });
+    // zig fmt: on
+}
+
+test "array of tables" {
+    // zig fmt: off
+    {
+        var table = try testParse(&.{
+            .open_square_bracket, .open_square_bracket, .{ .key = "foo" }, .close_square_bracket, .close_square_bracket, .newline,
+            .{ .key = "bar"}, .equals, .{ .string = "a" }, .newline,
+
+            .open_square_bracket, .{ .key = "foo" }, .dot, .{ .key = "baz" }, .close_square_bracket, .newline,
+            .{ .key = "bat" }, .equals, .{ .string = "b" }, .newline,
+        });
+        defer table.deinit(testing.allocator);
+        try testing.expectEqual(@as(usize, 1), table.table.count());
+        const arr = table.table.get("foo").?.array;
+        try testing.expectEqual(@as(usize, 1), arr.items.len);
+        try testing.expectEqualStrings("a", arr.items[0].table.table.get("bar").?.string);
+        const inner_table = arr.items[0].table.table.get("baz").?.table;
+        try testing.expectEqualStrings("b", inner_table.table.get("bat").?.string);
+    }
+    // zig fmt: on
+}
+
+test "fail: array of tables" {
+    // zig fmt: off
+    try expectErrorParse(error.not_array, &.{
+            .open_square_bracket, .{ .key="foo" }, .dot, .{ .key = "bar"}, .close_square_bracket, .newline,
+            .{ .key = "baz" }, .equals, .{ .string = "b" }, .newline,
+
+            .open_square_bracket, .open_square_bracket, .{ .key="foo" }, .close_square_bracket, .close_square_bracket, .newline,
+            .{ .key = "bat"}, .equals, .{ .string = "a" }, .newline,
     });
     // zig fmt: on
 }

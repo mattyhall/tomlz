@@ -278,3 +278,63 @@ test "cargo" {
         \\}
     );
 }
+
+test "fruits" {
+    try expectParseEqualToJson(
+        \\[[fruits]]
+        \\name = "apple"
+        \\
+        \\[fruits.physical]  # subtable
+        \\color = "red"
+        \\shape = "round"
+        \\
+        \\[[fruits.varieties]]  # nested array of tables
+        \\name = "red delicious"
+        \\
+        \\[fruits.varieties.rating]
+        \\yumminess = 5
+        \\appearance = 6
+        \\
+        \\[[fruits.varieties]]
+        \\name = "granny smith"
+        \\
+        \\
+        \\[[fruits]]
+        \\name = "banana"
+        \\
+        \\[[fruits.varieties]]
+        \\name = "plantain"    
+    ,
+        \\{
+        \\    "fruits": [
+        \\        {
+        \\            "varieties": [
+        \\                {
+        \\                    "rating": {
+        \\                        "appearance": 6,
+        \\                        "yumminess": 5
+        \\                    },
+        \\                    "name": "red delicious"
+        \\                },
+        \\                {
+        \\                    "name": "granny smith"
+        \\                }
+        \\            ],
+        \\            "name": "apple",
+        \\            "physical": {
+        \\                "shape": "round",
+        \\                "color": "red"
+        \\            }
+        \\        },
+        \\        {
+        \\            "varieties": [
+        \\                {
+        \\                    "name": "plantain"
+        \\                }
+        \\            ],
+        \\            "name": "banana"
+        \\        }
+        \\    ]
+        \\}
+    );
+}
