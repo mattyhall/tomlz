@@ -287,12 +287,14 @@ const Parser = struct {
                     return error.key_already_exists;
                 }
 
-                var dup = try self.allocator.dupe(u8, k);
-                errdefer self.allocator.free(dup);
+                var val = tbl.table.getPtr(k) orelse b: {
+                    var dup = try self.allocator.dupe(u8, k);
+                    errdefer self.allocator.free(dup);
 
-                try tbl.table.put(self.allocator, dup, undefined);
-                var new_val = tbl.table.getPtr(k) orelse unreachable;
-                return .{ .table = tbl, .value = new_val };
+                    try tbl.table.put(self.allocator, dup, undefined);
+                    break :b tbl.table.getPtr(k) orelse unreachable;
+                };
+                return .{ .table = tbl, .value = val };
             }
 
             const existed = tbl.table.get(k) != null;
@@ -309,8 +311,10 @@ const Parser = struct {
     fn parseAssignment(self: *Parser, loc: lex.Loc, key: []const u8) !void {
         var val = b: {
             var al = std.ArrayList([]const u8).init(self.allocator);
-            defer al.deinit();
-            defer for (al.items) |s| self.allocator.free(s);
+            defer {
+                for (al.items) |s| self.allocator.free(s);
+                al.deinit();
+            }
 
             const new_loc = try self.parseKey(key, loc, &al);
             var res = try self.createPath(al.items, new_loc, false);
@@ -343,14 +347,14 @@ const Parser = struct {
             },
         };
 
-        var res = b: {
-            var al = std.ArrayList([]const u8).init(self.allocator);
-            defer al.deinit();
-            defer for (al.items) |s| self.allocator.free(s);
+        var al = std.ArrayList([]const u8).init(self.allocator);
+        defer {
+            for (al.items) |s| self.allocator.free(s);
+            al.deinit();
+        }
 
-            const new_loc = try self.parseKey(key, tokloc.loc, &al);
-            break :b try self.createPath(al.items, new_loc, false);
-        };
+        const new_loc = try self.parseKey(key, tokloc.loc, &al);
+        var res = try self.createPath(al.items, new_loc, false);
 
         res.value.* = .{ .table = .{} };
         self.current_table = &res.value.table;
@@ -366,8 +370,10 @@ const Parser = struct {
     /// NOTE: The caller is responsible for freeing the key in the result
     pub fn parseArrayHeaderKey(self: *Parser, key: []const u8, loc: lex.Loc) !struct { table: *Table, key: []const u8 } {
         var al = std.ArrayList([]const u8).init(self.allocator);
-        defer al.deinit();
-        defer for (al.items) |s| self.allocator.free(s);
+        defer {
+            for (al.items) |s| self.allocator.free(s);
+            al.deinit();
+        }
 
         const new_loc = try self.parseKey(key, loc, &al);
 
