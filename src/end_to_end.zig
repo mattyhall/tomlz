@@ -232,6 +232,7 @@ test "cargo" {
         \\base64  = "0.10"
         \\xml-rs  = "0.8"
         \\libflate = "0.1.18"
+        \\zstd = { version = "0.5", optional = true }
     ,
         \\{
         \\    "lib": {
@@ -241,7 +242,11 @@ test "cargo" {
         \\    "dependencies": {
         \\        "xml-rs": "0.8",
         \\        "base64": "0.10",
-        \\        "libflate": "0.1.18"
+        \\        "libflate": "0.1.18",
+        \\        "zstd": {
+        \\            "optional": true,
+        \\            "version": "0.5"
+        \\        }
         \\    },
         \\    "features": {
         \\        "default": [

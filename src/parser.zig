@@ -206,6 +206,7 @@ const Parser = struct {
             .integer => |i| Value{ .integer = i },
             .boolean => |b| Value{ .boolean = b },
             .open_square_bracket => try self.parseInlineArray(),
+            .open_curly_brace => try self.parseInlineTable(),
             else => {
                 self.diag = .{
                     .msg = "expected value type",
@@ -225,7 +226,15 @@ const Parser = struct {
     }
 
     /// parseInlineArray parses a value of the form "[ <value-1>, <value-2>, ...]"
-    fn parseInlineArray(self: *Parser) error{ OutOfMemory, unexpected_token, unexpected_char, eof }!Value {
+    fn parseInlineArray(self: *Parser) error{
+        OutOfMemory,
+        unexpected_token,
+        unexpected_char,
+        eof,
+        key_already_exists,
+        not_table_or_array,
+        not_table,
+    }!Value {
         var al = std.ArrayListUnmanaged(Value){};
         errdefer {
             for (al.items) |*item| {
@@ -256,6 +265,59 @@ const Parser = struct {
                         .loc = tokloc.loc,
                     };
                     return error.unexpected_char;
+                },
+            }
+        }
+    }
+
+    fn parseInlineTable(self: *Parser) error{
+        OutOfMemory,
+        unexpected_token,
+        unexpected_char,
+        eof,
+        not_table_or_array,
+        key_already_exists,
+        not_table,
+    }!Value {
+        const curr = self.current_table;
+
+        var tbl = Table{};
+        errdefer tbl.deinit(self.allocator);
+
+        self.current_table = &tbl;
+        defer self.current_table = curr;
+
+        var first = true;
+        while (true) {
+            const tokloc = try self.pop();
+            switch (tokloc.tok) {
+                .close_curly_brace => {
+                    if (first) return .{ .table = tbl };
+
+                    self.diag = .{ .msg = "trailing comma not allowed in inline table", .loc = tokloc.loc };
+                    return error.unexpected_token;
+                },
+                .key => |k| try self.parseAssignment(tokloc.loc, k),
+                .string => |s| try self.parseAssignment(tokloc.loc, s),
+                else => {
+                    self.diag = .{ .msg = "expected a key in inline table", .loc = tokloc.loc };
+                    return error.unexpected_token;
+                },
+            }
+
+            first = false;
+
+            const next = try self.peek();
+            switch (next.tok) {
+                .close_curly_brace => {
+                    _ = self.pop() catch unreachable;
+                    return .{ .table = tbl };
+                },
+                .comma => _ = self.pop() catch unreachable,
+                else => {
+                    std.debug.print("{}\n", .{next});
+                    self.diag = .{ .msg = "expected a comma after assignment in inline table", .loc = next.loc };
+                    return error.unexpected_token;
                 },
             }
         }
@@ -342,6 +404,24 @@ const Parser = struct {
 
         val.* = try self.parseValue();
 
+        const next = self.peek() catch |err| switch (err) {
+            error.eof => return,
+            else => return err,
+        };
+
+        switch (next.tok) {
+            .newline, .comma, .close_curly_brace => return,
+            else => {
+                self.diag = .{ .msg = "expected comma, newline or eof after assignment", .loc = next.loc };
+                return error.unexpected_token;
+            },
+        }
+    }
+
+    /// parseAssignmentEatNewline runs parseAssignment and then expects a newline. It is used for assignments on their
+    /// own line
+    fn parseAssignmentEatNewline(self: *Parser, loc: lex.Loc, key: []const u8) !void {
+        try self.parseAssignment(loc, key);
         self.expect(.newline, "\n") catch |err| switch (err) {
             error.eof => return,
             else => return err,
@@ -463,8 +543,8 @@ const Parser = struct {
             };
 
             switch (tokloc.tok) {
-                .key => |k| try self.parseAssignment(tokloc.loc, k),
-                .string => |s| try self.parseAssignment(tokloc.loc, s),
+                .key => |k| try self.parseAssignmentEatNewline(tokloc.loc, k),
+                .string => |s| try self.parseAssignmentEatNewline(tokloc.loc, s),
                 .open_square_bracket => {
                     self.current_table = self.top_level_table;
                     const next = try self.peek();
@@ -881,6 +961,56 @@ test "fail: array of tables" {
 
             .open_square_bracket, .open_square_bracket, .{ .key="foo" }, .close_square_bracket, .close_square_bracket, .newline,
             .{ .key = "bat"}, .equals, .{ .string = "a" }, .newline,
+    });
+    // zig fmt: on
+}
+
+test "inline tables" {
+    // zig fmt: off
+    {
+        var table = try testParse(&.{ 
+            .{ .key = "foo" }, .equals, .open_curly_brace,
+                .{ .key = "bar"}, .equals, .{ .string = "a" }, .comma,
+                .{ .key = "baz" }, .equals, .{ .string = "b" },
+            .close_curly_brace,
+        });
+        defer table.deinit(testing.allocator);
+        try testing.expectEqualStrings("a", table.table.get("foo").?.table.table.get("bar").?.string);
+        try testing.expectEqualStrings("b", table.table.get("foo").?.table.table.get("baz").?.string);
+    }
+
+    {
+        var table = try testParse(&.{ 
+            .{ .key = "foo" }, .equals, .open_curly_brace,
+                .{ .key = "bar"}, .dot, .{ .key = "baz"}, .equals, .{ .string = "a" },
+            .close_curly_brace,
+        });
+        defer table.deinit(testing.allocator);
+        try testing.expectEqualStrings(
+            "a", 
+            table.table.get("foo").?.table.table.get("bar").?.table.table.get("baz").?.string);
+    }
+    // zig fmt: on
+}
+
+test "fail: inline tables" {
+    // zig fmt: off
+    try expectErrorParse(error.unexpected_token, &.{
+            .{ .key = "foo" }, .equals, .open_curly_brace,
+                .{ .key = "bar"}, .equals, .{ .string = "a" }, .comma,
+            .close_curly_brace,
+    });
+
+    try expectErrorParse(error.unexpected_token, &.{
+            .{ .key = "foo" }, .equals, .open_curly_brace, .newline,
+                .{ .key = "bar"}, .equals, .{ .string = "a" },
+            .close_curly_brace,
+    });
+
+    try expectErrorParse(error.unexpected_token, &.{
+            .{ .key = "foo" }, .equals, .open_curly_brace,
+                .{ .key = "bar"}, .equals, .{ .string = "a" }, .comma, .newline,
+            .close_curly_brace,
     });
     // zig fmt: on
 }

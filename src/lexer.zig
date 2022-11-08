@@ -12,6 +12,8 @@ pub const Tok = union(enum) {
     dot,
     open_square_bracket,
     close_square_bracket,
+    open_curly_brace,
+    close_curly_brace,
     comma,
 
     key: []const u8,
@@ -253,6 +255,11 @@ pub const Lexer = struct {
         self.loc.col += full_len;
         return TokLoc{ .loc = loc, .tok = tok };
     }
+    
+    fn consume(self: *Lexer, tok: Tok, loc: Loc) TokLoc {
+        _ = self.pop() catch unreachable;
+        return .{ .tok = tok, .loc = loc };
+    }
 
     /// next gives the next token, or null if there are none left.
     ///
@@ -274,37 +281,21 @@ pub const Lexer = struct {
         const loc = self.loc;
 
         switch (c) {
+            '=' => return self.consume(.equals, loc),
+            '.' => return self.consume(.dot, loc),
+            ',' => return self.consume(.comma, loc),
+            '[' => return self.consume(.open_square_bracket, loc),
+            ']' => return self.consume(.close_square_bracket, loc),
+            '{' => return self.consume(.open_curly_brace, loc),
+            '}' => return self.consume(.close_curly_brace, loc),
+            '\n' => return self.consume(.newline, loc),
             '"' => {
                 _ = self.pop() catch unreachable;
                 return try self.parseString();
             },
-            '=' => {
-                _ = self.pop() catch unreachable;
-                return TokLoc{ .loc = loc, .tok = .equals };
-            },
-            '.' => {
-                _ = self.pop() catch unreachable;
-                return TokLoc{ .loc = loc, .tok = .dot };
-            },
-            '\n' => {
-                _ = self.pop() catch unreachable;
-                return TokLoc{ .loc = loc, .tok = .newline };
-            },
             '-', '+', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' => return try self.parseNumber(),
             't' => return try self.parseKeyword("rue", .{ .boolean = true }),
             'f' => return try self.parseKeyword("alse", .{ .boolean = false }),
-            '[' => {
-                _ = self.pop() catch unreachable;
-                return TokLoc{ .loc = loc, .tok = .open_square_bracket };
-            },
-            ']' => {
-                _ = self.pop() catch unreachable;
-                return TokLoc{ .loc = loc, .tok = .close_square_bracket };
-            },
-            ',' => {
-                _ = self.pop() catch unreachable;
-                return TokLoc{ .loc = loc, .tok = .comma };
-            },
             else => return try self.parseKey(),
         }
     }
@@ -437,4 +428,9 @@ test "square brackets" {
         "[1,2]",
         &.{ .open_square_bracket, .{ .integer = 1 }, .comma, .{ .integer = 2 }, .close_square_bracket },
     );
+}
+
+test "curly braces" {
+    try testTokens("{}", &.{ .open_curly_brace, .close_curly_brace });
+    try testTokens("{foo = 10}", &.{ .open_curly_brace, .{ .key = "foo" }, .equals, .{ .integer = 10 }, .close_curly_brace });
 }
