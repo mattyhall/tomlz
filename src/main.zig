@@ -6,9 +6,9 @@ const parser = @import("parser.zig");
 pub fn main() !void {
     var gpa = std.heap.page_allocator;
     var table = try parser.parse(gpa,
-        \\[[foo.bar]]
+        \\[[foo]]
         \\a = 1
-        \\[[foo.bar]]
+        \\[[foo]]
         \\b = 2
     );
     defer table.deinit(gpa);

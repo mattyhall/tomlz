@@ -150,49 +150,52 @@ const Parser = struct {
         }
     }
 
-    /// parseKey parses a potentially nested (i.e. with dots in) key and returns the table any subsequent value should
-    /// be in, alongside the final key. If any table in the path does not exist then it will create it.
-    fn parseKey(self: *Parser, key: []const u8) !struct { tbl: *Table, key: []const u8 } {
+    /// parseKey parses a potentially nested (i.e. with dots in) key and inserts each key segment into al. It returns
+    /// the location of the final key
+    fn parseKey(self: *Parser, key: []const u8, loc: lex.Loc, al: *std.ArrayList([]const u8)) !lex.Loc {
         var dup: []const u8 = try self.allocator.dupe(u8, key);
-        errdefer self.allocator.free(dup);
+        {
+            errdefer self.allocator.free(dup);
+            try al.append(dup);
+        }
 
-        const next = try self.peek();
-        switch (next.tok) {
-            .equals, .close_square_bracket => return .{ .tbl = self.current_table, .key = dup },
-            .dot => {
-                _ = self.pop() catch unreachable;
+        var prev_loc = loc;
 
-                const existed = self.current_table.hasKey(dup);
-                var new = try self.current_table.getOrPutTable(self.allocator, dup, .{});
-                var curr = self.current_table;
-                self.current_table = new;
+        while (true) {
+            const next = try self.peek();
+            switch (next.tok) {
+                .equals, .close_square_bracket => return prev_loc,
+                .dot => {},
+                else => {
+                    self.diag = .{
+                        .msg = "expected '.', ']' or '=' after key",
+                        .loc = next.loc,
+                    };
+                    return error.unexpected_token;
+                },
+            }
 
-                const key_tok = try self.pop();
-                const key_s = switch (key_tok.tok) {
-                    .key => |k| k,
-                    .string => |s| s,
-                    else => {
-                        self.diag = .{
-                            .msg = "expected key after '.'",
-                            .loc = key_tok.loc,
-                        };
-                        return error.unexpected_token;
-                    },
-                };
-                const res = try self.parseKey(key_s);
+            _ = self.pop() catch unreachable;
 
-                if (existed) self.allocator.free(dup);
-                self.current_table = curr;
+            const key_tok = try self.pop();
+            prev_loc = key_tok.loc;
+            const key_s = switch (key_tok.tok) {
+                .key => |k| k,
+                .string => |s| s,
+                else => {
+                    self.diag = .{
+                        .msg = "expected key after '.'",
+                        .loc = key_tok.loc,
+                    };
+                    return error.unexpected_token;
+                },
+            };
 
-                return res;
-            },
-            else => {
-                self.diag = .{
-                    .msg = "expected '.', ']' or '=' after key",
-                    .loc = next.loc,
-                };
-                return error.unexpected_token;
-            },
+            var new_dup = try self.allocator.dupe(u8, key_s);
+            {
+                errdefer self.allocator.free(new_dup);
+                try al.append(new_dup);
+            }
         }
     }
 
@@ -258,30 +261,65 @@ const Parser = struct {
         }
     }
 
-    /// parseAssignment parses a key/value assignent to `key`, followed by either a newline or EOF
+    /// createPath takes a key_path and ensures that it exists. If any key at any point in the path does not exist then
+    /// it will be created. All but the final key are created as tables - e.g. "foo.bar.baz" will ensure "foo" is a
+    /// table in self.current_table, "bar" is a table in that. "baz" will be a value with an undefined type which the
+    /// caller should fill in
+    fn createPath(
+        self: *Parser,
+        key_path: []const []const u8,
+        loc: lex.Loc,
+        allow_exists: bool,
+    ) !struct { table: *Table, value: *Value, existed: bool = false } {
+        std.debug.assert(key_path.len > 0);
+
+        var tbl = self.current_table;
+        for (key_path) |k, i| {
+            if (i == key_path.len - 1) {
+                if (tbl.hasKey(k)) {
+                    if (allow_exists)
+                        return .{ .table = tbl, .value = tbl.table.getPtr(k) orelse unreachable, .existed = true };
+
+                    self.diag = .{
+                        .msg = "key already exists",
+                        .loc = loc,
+                    };
+                    return error.key_already_exists;
+                }
+
+                var dup = try self.allocator.dupe(u8, k);
+                errdefer self.allocator.free(dup);
+
+                try tbl.table.put(self.allocator, dup, undefined);
+                var new_val = tbl.table.getPtr(k) orelse unreachable;
+                return .{ .table = tbl, .value = new_val };
+            }
+
+            const existed = tbl.table.get(k) != null;
+            var dup = try self.allocator.dupe(u8, k);
+            errdefer self.allocator.free(dup);
+            tbl = try tbl.getOrPutTable(self.allocator, dup, .{});
+            if (existed) self.allocator.free(dup);
+        }
+
+        unreachable;
+    }
+
+    /// parseAssignment parses a key/value assignment to `key`, followed by either a newline or EOF
     fn parseAssignment(self: *Parser, loc: lex.Loc, key: []const u8) !void {
-        const curr = self.current_table;
-        const res = try self.parseKey(key);
-        errdefer self.allocator.free(res.key);
-        self.current_table = curr;
+        var val = b: {
+            var al = std.ArrayList([]const u8).init(self.allocator);
+            defer al.deinit();
+            defer for (al.items) |s| self.allocator.free(s);
+
+            const new_loc = try self.parseKey(key, loc, &al);
+            var res = try self.createPath(al.items, new_loc, false);
+            break :b res.value;
+        };
 
         try self.expect(.equals, "=");
 
-        if (res.tbl.hasKey(res.key)) {
-            self.diag = .{
-                .msg = "key already exists",
-                .loc = loc,
-            };
-            return error.key_already_exists;
-        }
-
-        var val = try self.parseValue();
-        errdefer val.deinit(self.allocator);
-
-        try res.tbl.insert(self.allocator, res.key, val);
-        // we have errdefer'ed freeing dup and val above, therefore we need to remove them from current_table so we
-        // don't try to double free them when we deinit current_table
-        errdefer _ = res.tbl.table.remove(res.key);
+        val.* = try self.parseValue();
 
         self.expect(.newline, "\n") catch |err| switch (err) {
             error.eof => return,
@@ -300,23 +338,55 @@ const Parser = struct {
             .key => |k| k,
             .string => |s| s,
             else => {
-                std.debug.print("{}\n", .{tokloc});
                 self.diag = .{ .msg = "expected key inside of square brackets", .loc = tokloc.loc };
                 return error.unexpected_token;
             },
         };
 
-        const res = try self.parseKey(key);
-        const existed = res.tbl.hasKey(res.key);
-        errdefer if (!existed) self.allocator.free(res.key);
-        defer if (existed) self.allocator.free(res.key);
+        var res = b: {
+            var al = std.ArrayList([]const u8).init(self.allocator);
+            defer al.deinit();
+            defer for (al.items) |s| self.allocator.free(s);
 
-        self.current_table = try res.tbl.getOrPutTable(self.allocator, res.key, .{});
-        // We've errdefer'ed freeing dup
-        errdefer _ = res.tbl.table.remove(res.key);
+            const new_loc = try self.parseKey(key, tokloc.loc, &al);
+            break :b try self.createPath(al.items, new_loc, false);
+        };
+
+        res.value.* = .{ .table = .{} };
+        self.current_table = &res.value.table;
 
         try self.expect(.close_square_bracket, "]");
         try self.expect(.newline, "\n");
+    }
+
+    /// parseArrayHeaderKey parses the key inside an array header. It will ensure that all but the last key in the path
+    /// exists as a table. It then returns the final table it created (or just self.current_table if the key inside the
+    /// header is not a path) and the final key.
+    ///
+    /// NOTE: The caller is responsible for freeing the key in the result
+    pub fn parseArrayHeaderKey(self: *Parser, key: []const u8, loc: lex.Loc) !struct { table: *Table, key: []const u8 } {
+        var al = std.ArrayList([]const u8).init(self.allocator);
+        defer al.deinit();
+        defer for (al.items) |s| self.allocator.free(s);
+
+        const new_loc = try self.parseKey(key, loc, &al);
+
+        std.debug.assert(al.items.len > 0);
+        if (al.items.len == 1) return .{ .table = self.current_table, .key = try self.allocator.dupe(u8, al.items[0]) };
+
+        const all_but_last_key = al.items[0 .. al.items.len - 1];
+        var res = try self.createPath(all_but_last_key, new_loc, true);
+        if (res.existed and res.value.* != .table) {
+            self.diag = .{
+                .msg = "key already exists and is not a table",
+                .loc = new_loc,
+            };
+            return error.not_table;
+        }
+
+        if (!res.existed) res.value.* = .{ .table = .{} };
+
+        return .{ .table = &res.value.table, .key = try self.allocator.dupe(u8, al.items[al.items.len - 1]) };
     }
 
     /// parseArrayHeader parses "[[<key>]]\n" which specifies the next assignments should be in a table in the array
@@ -331,23 +401,22 @@ const Parser = struct {
             .key => |k| k,
             .string => |s| s,
             else => {
-                std.debug.print("{}\n", .{tokloc});
                 self.diag = .{ .msg = "expected key inside of square brackets", .loc = tokloc.loc };
                 return error.unexpected_token;
             },
         };
 
-        const res = try self.parseKey(key);
-        const existed = res.tbl.hasKey(res.key);
-        errdefer if (!existed) self.allocator.free(res.key);
+        var res = try self.parseArrayHeaderKey(key, tokloc.loc);
+        const existed = res.table.hasKey(res.key);
+        var arr = b: {
+            errdefer self.allocator.free(res.key);
+
+            break :b try res.table.getOrPutArray(self.allocator, res.key);
+        };
+
         defer if (existed) self.allocator.free(res.key);
 
-        var arr = try res.tbl.getOrPutArray(self.allocator, res.key);
-        // We've errdefer'ed freeing dup
-        errdefer _ = res.tbl.table.remove(res.key);
-
         try arr.append(self.allocator, .{ .table = .{} });
-        errdefer arr.deinit(self.allocator);
         self.current_table = &arr.items[arr.items.len - 1].table;
 
         try self.expect(.close_square_bracket, "]");
@@ -742,7 +811,7 @@ test "fail: arrays" {
     );
 
     // zig fmt: off
-    try expectErrorParse(error.not_table, &.{
+    try expectErrorParse(error.key_already_exists, &.{
             .open_square_bracket, .open_square_bracket, .{ .key="foo" }, .close_square_bracket, .close_square_bracket, .newline,
             .{ .key = "bar"}, .equals, .{ .string = "a" }, .newline,
 
