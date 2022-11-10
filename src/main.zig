@@ -1,15 +1,30 @@
 const std = @import("std");
 const testing = std.testing;
-const lexer = @import("lexer.zig");
+const lex = @import("lexer.zig");
 const parser = @import("parser.zig");
 
 pub fn main() !void {
+    if (std.os.argv.len != 2) {
+        std.debug.print("Please pass a TOML file as the second argument", .{});
+    }
+
     var gpa = std.heap.page_allocator;
-    var table = try parser.parse(gpa,
-        \\foo = 1
-        \\bar = 2
-   
-    );
+
+    var f = try std.fs.openFileAbsoluteZ(std.os.argv[1], .{});
+    defer f.close();
+
+    var contents = try f.reader().readAllAlloc(gpa, 5 * 1024 * 1024);
+    defer gpa.free(contents);
+
+    var lexer = parser.Lexer{ .real = lex.Lexer.init(gpa, contents) };
+    var p = try parser.Parser.init(gpa, lexer);
+    defer p.deinit();
+
+    var table = p.parse() catch |err| {
+        std.debug.print("error parsing {s}: {}\n", .{ std.os.argv[1], err });
+        std.debug.print("{?}\n", .{p.diag});
+        return;
+    };
     defer table.deinit(gpa);
 
     const e2e = @import("end_to_end.zig");
@@ -24,9 +39,11 @@ pub fn main() !void {
 
 test "refAllDecls" {
     const end2end = @import("end_to_end.zig");
+    const standard_tests = @import("standard_tests.zig");
 
     std.testing.refAllDecls(@This());
-    std.testing.refAllDecls(lexer);
+    std.testing.refAllDecls(lex);
     std.testing.refAllDecls(parser);
     std.testing.refAllDecls(end2end);
+    std.testing.refAllDecls(standard_tests);
 }

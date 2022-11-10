@@ -3,7 +3,7 @@ const lex = @import("lexer.zig");
 const testing = std.testing;
 
 /// Lexer is a wrapper enum so we can do static dispatch on real/fake lexers for testing purposes
-const Lexer = union(enum) {
+pub const Lexer = union(enum) {
     real: lex.Lexer,
     fake: lex.Fake,
 
@@ -112,7 +112,7 @@ pub const Value = union(enum) {
 };
 
 /// Parser takes a Lexer and parses the tokens into a table.
-const Parser = struct {
+pub const Parser = struct {
     allocator: std.mem.Allocator,
     lexer: Lexer,
     peeked: ?lex.TokLoc = null,
@@ -120,7 +120,7 @@ const Parser = struct {
     top_level_table: *Table,
     current_table: *Table,
 
-    fn init(allocator: std.mem.Allocator, lexer: Lexer) !Parser {
+    pub fn init(allocator: std.mem.Allocator, lexer: Lexer) !Parser {
         var table = try allocator.create(Table);
         table.* = .{};
         return .{ .allocator = allocator, .lexer = lexer, .top_level_table = table, .current_table = table };
@@ -533,7 +533,7 @@ const Parser = struct {
         try self.expect(.newline, "\n");
     }
 
-    fn parse(self: *Parser) !Table {
+    pub fn parse(self: *Parser) !Table {
         while (true) {
             const tokloc = self.pop() catch |err| switch (err) {
                 error.eof => {

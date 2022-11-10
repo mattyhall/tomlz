@@ -323,7 +323,7 @@ fn readAllTokens(src: []const u8) ![]const Tok {
 
     var al = std.ArrayListUnmanaged(Tok){};
     while (try lexer.next()) |tok_loc| {
-        try al.append(testing.allocator, try tok_loc.tok.dupe(std.testing.allocator));
+        try al.append(testing.allocator, try tok_loc.tok.dupe(testing.allocator));
     }
 
     return al.items;
