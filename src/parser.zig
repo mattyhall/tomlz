@@ -241,6 +241,7 @@ pub const Parser = struct {
         key_already_exists,
         not_table_or_array,
         not_table,
+        string_not_ended,
     }!Value {
         var al = std.ArrayListUnmanaged(Value){};
         errdefer {
@@ -285,6 +286,7 @@ pub const Parser = struct {
         not_table_or_array,
         key_already_exists,
         not_table,
+        string_not_ended,
     }!Value {
         const curr = self.current_table;
 

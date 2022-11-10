@@ -55,7 +55,7 @@ pub const Lexer = struct {
     index: usize,
     diag: ?Diagnostic,
 
-    pub const Error = error{ eof, unexpected_char, OutOfMemory };
+    pub const Error = error{ eof, unexpected_char, OutOfMemory, string_not_ended };
 
     pub fn init(allocator: std.mem.Allocator, src: []const u8) Lexer {
         var arena = std.heap.ArenaAllocator.init(allocator);
@@ -117,10 +117,14 @@ pub const Lexer = struct {
         const loc = self.loc;
         var al = std.ArrayListUnmanaged(u8){};
         while (true) {
-            switch (try self.pop()) {
+            const c = self.pop() catch |err| switch (err) {
+                error.eof => return error.string_not_ended,
+                else => return err,
+            };
+            switch (c) {
                 '"' => return TokLoc{ .loc = loc, .tok = .{ .string = al.items } },
                 '\\' => try al.append(self.arena.allocator(), try self.parseEscapeChar()),
-                else => |c| try al.append(self.arena.allocator(), c),
+                else => try al.append(self.arena.allocator(), c),
             }
         }
     }
