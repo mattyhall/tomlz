@@ -255,7 +255,7 @@ pub const Lexer = struct {
         self.loc.col += full_len;
         return TokLoc{ .loc = loc, .tok = tok };
     }
-    
+
     fn consume(self: *Lexer, tok: Tok, loc: Loc) TokLoc {
         _ = self.pop() catch unreachable;
         return .{ .tok = tok, .loc = loc };
@@ -299,6 +299,10 @@ pub const Lexer = struct {
             else => return try self.parseKey(),
         }
     }
+
+    pub fn deinit(self: *Lexer) void {
+        self.arena.deinit();
+    }
 };
 
 pub const Fake = struct {
@@ -315,6 +319,8 @@ pub const Fake = struct {
 
 fn readAllTokens(src: []const u8) ![]const Tok {
     var lexer = Lexer.init(testing.allocator, src);
+    defer lexer.deinit();
+
     var al = std.ArrayListUnmanaged(Tok){};
     while (try lexer.next()) |tok_loc| {
         try al.append(testing.allocator, try tok_loc.tok.dupe(std.testing.allocator));
@@ -325,7 +331,12 @@ fn readAllTokens(src: []const u8) ![]const Tok {
 
 fn testTokens(src: []const u8, expected: []const Tok) !void {
     var toks = try readAllTokens(src);
-    defer testing.allocator.free(toks);
+    defer {
+        for (toks) |tok| {
+            tok.deinit(testing.allocator);
+        }
+        defer testing.allocator.free(toks);
+    }
 
     try testing.expectEqual(expected.len, toks.len);
 
@@ -341,8 +352,6 @@ fn testTokens(src: []const u8, expected: []const Tok) !void {
                 .string => |s| try testing.expectEqualStrings(s, actual.string),
                 else => try testing.expectEqual(exp, actual),
             }
-
-            actual.deinit(testing.allocator);
         }
     }
 }

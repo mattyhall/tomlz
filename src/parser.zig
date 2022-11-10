@@ -13,6 +13,13 @@ const Lexer = union(enum) {
             .fake => |*f| f.next(),
         };
     }
+
+    fn deinit(self: *Lexer) void {
+        switch (self.*) {
+            .real => |*r| r.deinit(),
+            else => {},
+        }
+    }
 };
 
 /// Table represents a TOML table (i.e. dicitonary/hashmap). It assumes that the key and value were allocated with the
@@ -315,7 +322,6 @@ const Parser = struct {
                 },
                 .comma => _ = self.pop() catch unreachable,
                 else => {
-                    std.debug.print("{}\n", .{next});
                     self.diag = .{ .msg = "expected a comma after assignment in inline table", .loc = next.loc };
                     return error.unexpected_token;
                 },
@@ -568,16 +574,16 @@ const Parser = struct {
         }
     }
 
-    fn deinit(self: *Parser) void {
+    pub fn deinit(self: *Parser) void {
         self.top_level_table.deinit(self.allocator);
         self.allocator.destroy(self.top_level_table);
+        self.lexer.deinit();
     }
 };
 
 /// parse takes a given TOML source and returns a Table which has been allocated with the given allocator.
 pub fn parse(allocator: std.mem.Allocator, src: []const u8) !Table {
-    var lexer = Lexer{ .real = lex.Lexer.init(allocator, src) };
-    var parser = try Parser.init(allocator, lexer);
+    var parser = try Parser.init(allocator, .{ .real = lex.Lexer.init(allocator, src) });
     defer parser.deinit();
 
     return try parser.parse();
