@@ -252,15 +252,15 @@ pub const Lexer = struct {
                 self.diag = .{ .msg = "expected number", .loc = loc };
                 return error.unexpected_char;
             };
-            i = i * base + digit;
+            i = i * base + sign * digit;
 
             loc = self.loc;
             c = self.peek() catch |err| switch (err) {
-                error.eof => return TokLoc{ .tok = .{ .integer = i * sign }, .loc = loc },
+                error.eof => return TokLoc{ .tok = .{ .integer = i }, .loc = loc },
                 else => return err,
             };
             if (!std.ascii.isAlphanumeric(c))
-                return TokLoc{ .tok = .{ .integer = i * sign }, .loc = loc };
+                return TokLoc{ .tok = .{ .integer = i }, .loc = loc };
 
             _ = self.pop() catch unreachable;
         }
