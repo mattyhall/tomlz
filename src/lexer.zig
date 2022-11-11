@@ -232,6 +232,8 @@ pub const Lexer = struct {
             }
 
             _ = self.pop() catch unreachable;
+
+            c = try self.pop();
         }
 
         var i: i64 = 0;
