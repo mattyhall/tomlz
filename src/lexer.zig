@@ -191,14 +191,19 @@ pub const Lexer = struct {
     }
 
     pub fn parseNumber(self: *Lexer) Error!TokLoc {
+        var explicit_sign = false;
         var sign: i64 = 1;
         var base: u8 = 10;
         switch (self.peek() catch unreachable) {
             '-' => {
+                explicit_sign = true;
                 sign = -1;
                 _ = self.pop() catch unreachable;
             },
-            '+' => _ = self.pop() catch unreachable,
+            '+' => {
+                explicit_sign = true;
+                _ = self.pop() catch unreachable;
+            },
             else => {},
         }
 
@@ -220,6 +225,12 @@ pub const Lexer = struct {
                     return error.unexpected_char;
                 },
             }
+
+            if (explicit_sign and radix != 10) {
+                self.diag = .{ .msg = "only base 10 numbers can have an explicit sign", .loc = self.loc };
+                return error.unexpected_char;
+            }
+
             _ = self.pop() catch unreachable;
         }
 
@@ -407,10 +418,6 @@ test "integers" {
     try testTokens("-147", &.{.{ .integer = -147 }});
     try testTokens("0x147abc", &.{.{ .integer = 0x147abc }});
     try testTokens("0o147", &.{.{ .integer = 0o147 }});
-    try testTokens("-0x147abc", &.{.{ .integer = -0x147abc }});
-    try testTokens("-0o147", &.{.{ .integer = -0o147 }});
-    try testTokens("+0x147abc", &.{.{ .integer = 0x147abc }});
-    try testTokens("+0o147", &.{.{ .integer = 0o147 }});
     try testTokens("0b10010011", &.{.{ .integer = 0b10010011 }});
 }
 

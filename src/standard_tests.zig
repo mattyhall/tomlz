@@ -4,12 +4,8 @@ const lex = @import("lexer.zig");
 const parser = @import("parser.zig");
 
 const failing_invalid_tests = [_][]const u8{
-    "integer/negative-bin.toml",
-    "integer/negative-hex.toml",
     "integer/incomplete-bin.toml",
-    "integer/positive-hex.toml",
     "integer/incomplete-hex.toml",
-    "integer/positive-bin.toml",
     "integer/incomplete-oct.toml",
     "string/bad-multiline.toml",
     "array/extending-table.toml",
