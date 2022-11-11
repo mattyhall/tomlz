@@ -2,7 +2,7 @@ const std = @import("std");
 const parser = @import("parser.zig");
 const testing = std.testing;
 
-fn tomlValueToJson(allocator: std.mem.Allocator, v: *parser.Value) !std.json.Value {
+pub fn tomlValueToJson(allocator: std.mem.Allocator, v: *parser.Value) !std.json.Value {
     return switch (v.*) {
         .string => |s| std.json.Value{ .String = s },
         .integer => |s| std.json.Value{ .Integer = s },
