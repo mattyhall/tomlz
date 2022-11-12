@@ -8,7 +8,6 @@ const failing_invalid_tests = [_][]const u8{
     "array/extending-table.toml",
     "encoding/bad-utf8-in-comment.toml",
     "encoding/bad-utf8-in-string.toml",
-    "inline-table/add.toml",
     "control/string-del.toml",
     "control/string-null.toml",
     "control/string-us.toml",

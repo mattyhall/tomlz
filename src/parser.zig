@@ -26,6 +26,9 @@ pub const Lexer = union(enum) {
 /// same allocator
 pub const Table = struct {
     table: TableBase = .{},
+    source: Source,
+
+    const Source = enum { @"inline", header, top_level, assignment };
 
     const TableBase = std.StringHashMapUnmanaged(Value);
 
@@ -81,7 +84,7 @@ pub const Value = union(enum) {
                 break :b Value{ .array = new };
             },
             .table => |t| b: {
-                var new_table = Table{};
+                var new_table = Table{ .source = t.source };
                 var it = t.table.iterator();
                 while (it.next()) |entry| {
                     try new_table.insert(
@@ -122,7 +125,7 @@ pub const Parser = struct {
 
     pub fn init(allocator: std.mem.Allocator, lexer: Lexer) !Parser {
         var table = try allocator.create(Table);
-        table.* = .{};
+        table.* = .{ .source = .top_level };
         return .{ .allocator = allocator, .lexer = lexer, .top_level_table = table, .current_table = table };
     }
 
@@ -242,6 +245,7 @@ pub const Parser = struct {
         not_table_or_array,
         not_table,
         string_not_ended,
+        inline_tables_are_immutable,
     }!Value {
         var al = std.ArrayListUnmanaged(Value){};
         errdefer {
@@ -287,10 +291,11 @@ pub const Parser = struct {
         key_already_exists,
         not_table,
         string_not_ended,
+        inline_tables_are_immutable,
     }!Value {
         const curr = self.current_table;
 
-        var tbl = Table{};
+        var tbl = Table{ .source = .@"inline" };
         errdefer tbl.deinit(self.allocator);
 
         self.current_table = &tbl;
@@ -340,6 +345,7 @@ pub const Parser = struct {
         key_path: []const []const u8,
         loc: lex.Loc,
         allow_exists: bool,
+        source: Table.Source,
     ) !struct { table: *Table, value: *Value, existed: bool = false } {
         std.debug.assert(key_path.len > 0);
 
@@ -374,20 +380,23 @@ pub const Parser = struct {
 
             if (tbl.table.getPtr(k)) |val| {
                 switch (val.*) {
-                    .table => |*t| tbl = t,
+                    .table => |*t| {
+                        if (t.source == .@"inline") {
+                            self.diag = .{ .msg = "inline tables are immutable", .loc = loc };
+                            return error.inline_tables_are_immutable;
+                        }
+                        tbl = t;
+                    },
                     .array => |*a| tbl = &a.items[a.items.len - 1].table,
                     else => {
-                        self.diag = .{
-                            .msg = "key already exists and is not a table or array",
-                            .loc = loc,
-                        };
+                        self.diag = .{ .msg = "key already exists and is not a table or array", .loc = loc };
                         return error.not_table_or_array;
                     },
                 }
             } else {
                 var dup = try self.allocator.dupe(u8, k);
                 errdefer self.allocator.free(dup);
-                tbl = try tbl.getOrPutTable(self.allocator, dup, .{});
+                tbl = try tbl.getOrPutTable(self.allocator, dup, .{ .source = source });
             }
         }
 
@@ -404,7 +413,7 @@ pub const Parser = struct {
             }
 
             const new_loc = try self.parseKey(key, loc, &al);
-            var res = try self.createPath(al.items, new_loc, false);
+            var res = try self.createPath(al.items, new_loc, false, .assignment);
             break :b res.value;
         };
 
@@ -459,9 +468,9 @@ pub const Parser = struct {
         }
 
         const new_loc = try self.parseKey(key, tokloc.loc, &al);
-        var res = try self.createPath(al.items, new_loc, false);
+        var res = try self.createPath(al.items, new_loc, false, .header);
 
-        res.value.* = .{ .table = .{} };
+        res.value.* = .{ .table = .{ .source = .header } };
         self.current_table = &res.value.table;
 
         try self.expect(.close_square_bracket, "]");
@@ -486,7 +495,7 @@ pub const Parser = struct {
         if (al.items.len == 1) return .{ .table = self.current_table, .key = try self.allocator.dupe(u8, al.items[0]) };
 
         const all_but_last_key = al.items[0 .. al.items.len - 1];
-        var res = try self.createPath(all_but_last_key, new_loc, true);
+        var res = try self.createPath(all_but_last_key, new_loc, true, .header);
         if (res.existed and res.value.* != .table) {
             self.diag = .{
                 .msg = "key already exists and is not a table",
@@ -495,7 +504,7 @@ pub const Parser = struct {
             return error.not_table;
         }
 
-        if (!res.existed) res.value.* = .{ .table = .{} };
+        if (!res.existed) res.value.* = .{ .table = .{ .source = .header } };
 
         return .{ .table = &res.value.table, .key = try self.allocator.dupe(u8, al.items[al.items.len - 1]) };
     }
@@ -527,7 +536,7 @@ pub const Parser = struct {
 
         defer if (existed) self.allocator.free(res.key);
 
-        try arr.append(self.allocator, .{ .table = .{} });
+        try arr.append(self.allocator, .{ .table = .{ .source = .header } });
         self.current_table = &arr.items[arr.items.len - 1].table;
 
         try self.expect(.close_square_bracket, "]");
@@ -543,7 +552,7 @@ pub const Parser = struct {
                     self.allocator.destroy(self.top_level_table);
 
                     self.top_level_table = try self.allocator.create(Table);
-                    self.top_level_table.* = .{};
+                    self.top_level_table.* = .{ .source = .top_level };
                     self.current_table = self.top_level_table;
                     return table;
                 },
@@ -595,7 +604,7 @@ const KV = struct { k: []const u8, v: Value };
 
 /// kvsToTable takes a slice of KVs (i.e. assignments) and returns the table they would make
 fn kvsToTable(kvs: []const KV) !Table {
-    var table = Table{};
+    var table = Table{ .source = .assignment };
     for (kvs) |entry| {
         const v = try entry.v.dupe(testing.allocator);
         try table.insert(testing.allocator, try testing.allocator.dupe(u8, entry.k), v);
