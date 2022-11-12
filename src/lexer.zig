@@ -124,7 +124,14 @@ pub const Lexer = struct {
             switch (c) {
                 '"' => return TokLoc{ .loc = loc, .tok = .{ .string = al.items } },
                 '\\' => try al.append(self.arena.allocator(), try self.parseEscapeChar()),
-                else => try al.append(self.arena.allocator(), c),
+                else => {
+                    if ((c >= 0x0 and c <= 0x8) or (c >= 0xA and c <= 0x1f) or c == 0x7f) {
+                        self.diag = .{ .loc = loc, .msg = "unexpected control character in string" };
+                        return error.unexpected_char;
+                    }
+
+                    try al.append(self.arena.allocator(), c);
+                },
             }
         }
     }
