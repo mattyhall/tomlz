@@ -16,7 +16,7 @@ pub fn main() !void {
     var contents = try f.reader().readAllAlloc(gpa, 5 * 1024 * 1024);
     defer gpa.free(contents);
 
-    var lexer = parser.Lexer{ .real = lex.Lexer.init(gpa, contents) };
+    var lexer = parser.Lexer{ .real = try lex.Lexer.init(gpa, contents) };
     var p = try parser.Parser.init(gpa, lexer);
     defer p.deinit();
 

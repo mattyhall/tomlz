@@ -6,8 +6,6 @@ const parser = @import("parser.zig");
 const failing_invalid_tests = [_][]const u8{
     "string/bad-multiline.toml",
     "array/extending-table.toml",
-    "encoding/bad-utf8-in-comment.toml",
-    "encoding/bad-utf8-in-string.toml",
     "table/rrbrace.toml",
     "table/llbrace.toml",
 };

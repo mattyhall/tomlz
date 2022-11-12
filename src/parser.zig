@@ -594,7 +594,7 @@ pub const Parser = struct {
 
 /// parse takes a given TOML source and returns a Table which has been allocated with the given allocator.
 pub fn parse(allocator: std.mem.Allocator, src: []const u8) !Table {
-    var parser = try Parser.init(allocator, .{ .real = lex.Lexer.init(allocator, src) });
+    var parser = try Parser.init(allocator, .{ .real = try lex.Lexer.init(allocator, src) });
     defer parser.deinit();
 
     return try parser.parse();

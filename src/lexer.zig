@@ -57,9 +57,12 @@ pub const Lexer = struct {
 
     pub const Error = error{ eof, unexpected_char, OutOfMemory, string_not_ended };
 
-    pub fn init(allocator: std.mem.Allocator, src: []const u8) Lexer {
+    pub fn init(allocator: std.mem.Allocator, src: []const u8) !Lexer {
+        if (!std.unicode.utf8ValidateSlice(src))
+            return error.not_utf8;
+
         var arena = std.heap.ArenaAllocator.init(allocator);
-        return .{ .arena = arena, .source = src, .loc = .{ .line = 1, .col = 1 }, .diag = null, .index = 0 };
+        return Lexer{ .arena = arena, .source = src, .loc = .{ .line = 1, .col = 1 }, .diag = null, .index = 0 };
     }
 
     fn peek(self: *Lexer) Error!u8 {
@@ -290,8 +293,10 @@ pub const Lexer = struct {
     /// NOTE: any memory returned in TokLoc (e.g. the []const u8 array in a key/string) is only valid until the next
     /// call of next
     pub fn next(self: *Lexer) Error!?TokLoc {
+        var child = self.arena.child_allocator;
+
         self.arena.deinit();
-        self.arena = std.heap.ArenaAllocator.init(self.arena.child_allocator);
+        self.arena = std.heap.ArenaAllocator.init(child);
 
         self.skipWhitespaceAndComment() catch |err| switch (err) {
             error.eof => return null,
@@ -342,7 +347,7 @@ pub const Fake = struct {
 };
 
 fn readAllTokens(src: []const u8) ![]const Tok {
-    var lexer = Lexer.init(testing.allocator, src);
+    var lexer = try Lexer.init(testing.allocator, src);
     defer lexer.deinit();
 
     var al = std.ArrayListUnmanaged(Tok){};
