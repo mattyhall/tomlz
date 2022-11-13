@@ -303,29 +303,61 @@ pub const Lexer = struct {
         }
 
         var i: i64 = 0;
+        var last_c: ?u8 = null;
         while (true) {
             if (c == '.') {
-                if (had_number) return try self.parseFloat(loc, sign, base, i);
+                if (last_c == @as(u8, '_')) {
+                    self.diag = .{ .msg = "dot after underscore not allowed", .loc = loc };
+                    return error.unexpected_char;
+                }
 
-                self.diag = .{ .msg = "expected number (leading dot not allowed)", .loc = loc };
-                return error.unexpected_char;
+                if (!had_number) {
+                    self.diag = .{ .msg = "expected number (leading dot not allowed)", .loc = loc };
+                    return error.unexpected_char;
+                }
+
+                return try self.parseFloat(loc, sign, base, i);
             }
 
-            had_number = true;
+            if (c == '_') {
+                if (last_c == @as(u8, '_')) {
+                    self.diag = .{ .msg = "double underscores not allowed", .loc = loc };
+                    return error.unexpected_char;
+                }
 
-            var digit = std.fmt.parseInt(i64, &.{c}, base) catch {
-                self.diag = .{ .msg = "expected number", .loc = loc };
-                return error.unexpected_char;
-            };
-            i = i * base + sign * digit;
+                if (last_c == null) {
+                    self.diag = .{ .msg = "underscore not allowed after base", .loc = loc };
+                    return error.unexpected_char;
+                }
+            } else {
+                had_number = true;
+
+                var digit = std.fmt.parseInt(i64, &.{c}, base) catch {
+                    self.diag = .{ .msg = "expected number", .loc = loc };
+                    return error.unexpected_char;
+                };
+
+                i = i * base + sign * digit;
+            }
 
             loc = self.loc;
+            last_c = c;
             c = self.peek() catch |err| switch (err) {
-                error.eof => return TokLoc{ .tok = .{ .integer = i }, .loc = loc },
+                error.eof => {
+                    if (last_c != @as(u8, '_')) return TokLoc{ .tok = .{ .integer = i }, .loc = loc };
+
+                    self.diag = .{ .msg = "trailing underscores not allowed", .loc = loc };
+                    return error.unexpected_char;
+                },
                 else => return err,
             };
-            if (!std.ascii.isAlphanumeric(c) and c != '.')
-                return TokLoc{ .tok = .{ .integer = i }, .loc = loc };
+
+            if (!std.ascii.isAlphanumeric(c) and c != '.' and c != '_') {
+                if (last_c != @as(u8, '_')) return TokLoc{ .tok = .{ .integer = i }, .loc = loc };
+
+                self.diag = .{ .msg = "trailing underscores not allowed", .loc = loc };
+                return error.unexpected_char;
+            }
 
             _ = self.pop() catch unreachable;
         }
@@ -503,9 +535,13 @@ test "integers" {
     try testTokens("147", &.{.{ .integer = 147 }});
     try testTokens("+147", &.{.{ .integer = 147 }});
     try testTokens("-147", &.{.{ .integer = -147 }});
-    try testTokens("0x147abc", &.{.{ .integer = 0x147abc }});
+
     try testTokens("0o147", &.{.{ .integer = 0o147 }});
+    try testTokens("0x147abc", &.{.{ .integer = 0x147abc }});
     try testTokens("0b10010011", &.{.{ .integer = 0b10010011 }});
+
+    try testTokens("1_000_000", &.{.{ .integer = 1000000 }});
+    try testTokens("-1_000_000", &.{.{ .integer = -1000000 }});
 }
 
 test "floats" {

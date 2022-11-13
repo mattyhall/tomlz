@@ -12,8 +12,6 @@ const failing_invalid_tests = [_][]const u8{
 };
 
 const failing_valid_tests = [_][]const u8{
-    "integer/underscore.toml",
-    "integer/literals.toml",
     "comment/tricky.toml",
     "comment/everywhere.toml",
     "string/raw-multiline.toml",
