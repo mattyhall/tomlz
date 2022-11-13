@@ -256,9 +256,19 @@ pub const Lexer = struct {
 
                     // A trailing slash in a multiline string means trim up to the next non-whitespace character
                     var p = try self.peek();
-                    if (p == '\r' or p == '\n') {
+
+                    if (std.ascii.isWhitespace(p)) {
                         try self.skipWhitespaceAndComment();
-                        _ = self.pop() catch unreachable;
+                        if (self.pop() catch unreachable != '\n') return error.unexpected_char;
+
+                        while (true) {
+                            p = try self.peek();
+                            if (std.ascii.isWhitespace(p) and p != '\n' and p != '\r') {
+                                _ = self.pop() catch unreachable;
+                                continue;
+                            }
+                            break;
+                        }
                         continue;
                     }
 
