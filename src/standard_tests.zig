@@ -43,7 +43,6 @@ const failing_valid_tests = [_][]const u8{
     "key/numeric.toml",
     "key/alphanum.toml",
     "key/numeric-dotted.toml",
-    "inline-table/bool.toml",
     "inline-table/multiline.toml",
     "datetime/milliseconds.toml",
     "datetime/local-date.toml",

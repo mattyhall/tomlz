@@ -370,9 +370,12 @@ pub const Lexer = struct {
         if (self.source.len - self.index < full_len) return try self.parseKey();
         if (!std.mem.eql(u8, rest, self.source[self.index + 1 .. self.index + full_len])) return try self.parseKey();
 
-        // The character after rest must be either whitespace or an equals for this to be a keyword
+        // The character after rest must be either whitespace, an equals, a comma or a close curly brace for this to be
+        // a keyword
         if (self.source.len - self.index >= full_len + 1 and
-            (!std.ascii.isWhitespace(self.source[self.index + full_len])) and self.source[self.index + full_len] != '=')
+            !std.ascii.isWhitespace(self.source[self.index + full_len]) and 
+            self.source[self.index + full_len] != '=' and self.source[self.index + full_len] != ',' and 
+            self.source[self.index + full_len] != '}')
             return try self.parseKey();
 
         self.index += full_len;
