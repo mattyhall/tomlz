@@ -7,9 +7,9 @@ pub const Lexer = union(enum) {
     real: lex.Lexer,
     fake: lex.Fake,
 
-    fn next(self: *Lexer) lex.Lexer.Error!?lex.TokLoc {
+    fn next(self: *Lexer, force_key: bool) lex.Lexer.Error!?lex.TokLoc {
         return switch (self.*) {
-            .real => |*r| r.next(),
+            .real => |*r| r.next(force_key),
             .fake => |*f| f.next(),
         };
     }
@@ -130,20 +130,20 @@ pub const Parser = struct {
         return .{ .allocator = allocator, .lexer = lexer, .top_level_table = table, .current_table = table };
     }
 
-    fn peek(self: *Parser) !lex.TokLoc {
+    fn peek(self: *Parser, force_key: bool) !lex.TokLoc {
         if (self.peeked) |tokloc| return tokloc;
 
-        self.peeked = try self.lexer.next();
+        self.peeked = try self.lexer.next(force_key);
         return self.peeked orelse error.eof;
     }
 
-    fn pop(self: *Parser) !lex.TokLoc {
+    fn pop(self: *Parser, force_key: bool) !lex.TokLoc {
         if (self.peeked) |tokloc| {
             self.peeked = null;
             return tokloc;
         }
 
-        const next = try self.lexer.next();
+        const next = try self.lexer.next(force_key);
         return next orelse error.eof;
     }
 
@@ -151,7 +151,7 @@ pub const Parser = struct {
     ///
     /// NOTE: If the token stores a value (e.g. boolean, string) then it does not check that the value is the same
     fn expect(self: *Parser, comptime expected: lex.Tok, comptime str: []const u8) !void {
-        const actual = try self.pop();
+        const actual = try self.pop(false);
         if (std.meta.activeTag(actual.tok) != std.meta.activeTag(expected)) {
             self.diag = .{
                 .msg = "expected '" ++ str ++ "'",
@@ -173,7 +173,7 @@ pub const Parser = struct {
         var prev_loc = loc;
 
         while (true) {
-            const next = try self.peek();
+            const next = try self.peek(false);
             switch (next.tok) {
                 .equals, .close_square_bracket => return prev_loc,
                 .dot => {},
@@ -186,9 +186,9 @@ pub const Parser = struct {
                 },
             }
 
-            _ = self.pop() catch unreachable;
+            _ = self.pop(false) catch unreachable;
 
-            const key_tok = try self.pop();
+            const key_tok = try self.pop(true);
             prev_loc = key_tok.loc;
             const key_s = switch (key_tok.tok) {
                 .key => |k| k,
@@ -211,7 +211,7 @@ pub const Parser = struct {
     }
 
     fn parseValue(self: *Parser) !Value {
-        const tokloc = try self.pop();
+        const tokloc = try self.pop(false);
         var val = switch (tokloc.tok) {
             .string => |s| Value{ .string = try self.allocator.dupe(u8, s) },
             .integer => |i| Value{ .integer = i },
@@ -231,9 +231,9 @@ pub const Parser = struct {
         return val;
     }
 
-    fn skipNewlines(self: *Parser) !void {
-        while ((try self.peek()).tok == .newline) {
-            _ = self.pop() catch unreachable;
+    fn skipNewlines(self: *Parser, force_key: bool) !void {
+        while ((try self.peek(force_key)).tok == .newline) {
+            _ = self.pop(force_key) catch unreachable;
         }
     }
 
@@ -258,7 +258,7 @@ pub const Parser = struct {
         }
 
         while (true) {
-            try self.skipNewlines();
+            try self.skipNewlines(false);
 
             var v = try self.parseValue();
             {
@@ -266,9 +266,9 @@ pub const Parser = struct {
                 try al.append(self.allocator, v);
             }
 
-            try self.skipNewlines();
+            try self.skipNewlines(false);
 
-            const tokloc = try self.pop();
+            const tokloc = try self.pop(false);
             switch (tokloc.tok) {
                 .comma => {},
                 .newline => {},
@@ -305,7 +305,7 @@ pub const Parser = struct {
 
         var first = true;
         while (true) {
-            const tokloc = try self.pop();
+            const tokloc = try self.pop(true);
             switch (tokloc.tok) {
                 .close_curly_brace => {
                     if (first) return .{ .table = tbl };
@@ -323,13 +323,13 @@ pub const Parser = struct {
 
             first = false;
 
-            const next = try self.peek();
+            const next = try self.peek(true);
             switch (next.tok) {
                 .close_curly_brace => {
-                    _ = self.pop() catch unreachable;
+                    _ = self.pop(true) catch unreachable;
                     return .{ .table = tbl };
                 },
-                .comma => _ = self.pop() catch unreachable,
+                .comma => _ = self.pop(true) catch unreachable,
                 else => {
                     self.diag = .{ .msg = "expected a comma after assignment in inline table", .loc = next.loc };
                     return error.unexpected_token;
@@ -423,7 +423,7 @@ pub const Parser = struct {
 
         val.* = try self.parseValue();
 
-        const next = self.peek() catch |err| switch (err) {
+        const next = self.peek(false) catch |err| switch (err) {
             error.eof => return,
             else => return err,
         };
@@ -453,7 +453,7 @@ pub const Parser = struct {
     fn parseTableHeader(self: *Parser) !void {
         std.debug.assert(self.current_table == self.top_level_table);
 
-        const tokloc = try self.pop();
+        const tokloc = try self.pop(true);
         const key = switch (tokloc.tok) {
             .key => |k| k,
             .string => |s| s,
@@ -518,7 +518,7 @@ pub const Parser = struct {
     fn parseArrayHeader(self: *Parser) !void {
         std.debug.assert(self.current_table == self.top_level_table);
 
-        const tokloc = try self.pop();
+        const tokloc = try self.pop(true);
         const key = switch (tokloc.tok) {
             .key => |k| k,
             .string => |s| s,
@@ -548,7 +548,7 @@ pub const Parser = struct {
 
     pub fn parse(self: *Parser) !Table {
         while (true) {
-            const tokloc = self.pop() catch |err| switch (err) {
+            const tokloc = self.pop(true) catch |err| switch (err) {
                 error.eof => {
                     const table = self.top_level_table.*;
                     self.allocator.destroy(self.top_level_table);
@@ -566,10 +566,10 @@ pub const Parser = struct {
                 .string => |s| try self.parseAssignmentEatNewline(tokloc.loc, s),
                 .open_square_bracket => {
                     self.current_table = self.top_level_table;
-                    const next = try self.peek();
+                    const next = try self.peek(true);
                     switch (next.tok) {
                         .open_square_bracket => {
-                            _ = self.pop() catch unreachable;
+                            _ = self.pop(true) catch unreachable;
                             try self.parseArrayHeader();
                         },
                         else => try self.parseTableHeader(),

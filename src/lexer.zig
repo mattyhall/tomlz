@@ -373,8 +373,8 @@ pub const Lexer = struct {
         // The character after rest must be either whitespace, an equals, a comma or a close curly brace for this to be
         // a keyword
         if (self.source.len - self.index >= full_len + 1 and
-            !std.ascii.isWhitespace(self.source[self.index + full_len]) and 
-            self.source[self.index + full_len] != '=' and self.source[self.index + full_len] != ',' and 
+            !std.ascii.isWhitespace(self.source[self.index + full_len]) and
+            self.source[self.index + full_len] != '=' and self.source[self.index + full_len] != ',' and
             self.source[self.index + full_len] != '}')
             return try self.parseKey();
 
@@ -388,11 +388,12 @@ pub const Lexer = struct {
         return .{ .tok = tok, .loc = loc };
     }
 
-    /// next gives the next token, or null if there are none left.
+    /// next gives the next token, or null if there are none left. Force key ensures that numbers/keywords are parsed as
+    /// keys rather than their normal type. This is needed as TOML allows these values to be used as keys in assignments.
     ///
     /// NOTE: any memory returned in TokLoc (e.g. the []const u8 array in a key/string) is only valid until the next
     /// call of next
-    pub fn next(self: *Lexer) Error!?TokLoc {
+    pub fn next(self: *Lexer, force_key: bool) Error!?TokLoc {
         var child = self.arena.child_allocator;
 
         self.arena.deinit();
@@ -426,9 +427,18 @@ pub const Lexer = struct {
                 _ = self.pop() catch unreachable;
                 return try self.parseString(.single);
             },
-            '-', '+', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' => return try self.parseNumber(),
-            't' => return try self.parseKeyword("rue", .{ .boolean = true }),
-            'f' => return try self.parseKeyword("alse", .{ .boolean = false }),
+            '-', '+', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' => {
+                if (force_key) return try self.parseKey();
+                return try self.parseNumber();
+            },
+            't' => {
+                if (force_key) return try self.parseKey();
+                return try self.parseKeyword("rue", .{ .boolean = true });
+            },
+            'f' => {
+                if (force_key) return try self.parseKey();
+                return try self.parseKeyword("alse", .{ .boolean = false });
+            },
             else => return try self.parseKey(),
         }
     }
@@ -455,7 +465,7 @@ fn readAllTokens(src: []const u8) ![]const Tok {
     defer lexer.deinit();
 
     var al = std.ArrayListUnmanaged(Tok){};
-    while (try lexer.next()) |tok_loc| {
+    while (try lexer.next(false)) |tok_loc| {
         try al.append(testing.allocator, try tok_loc.tok.dupe(testing.allocator));
     }
 
