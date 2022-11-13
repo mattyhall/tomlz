@@ -263,7 +263,7 @@ pub const Lexer = struct {
 
                         while (true) {
                             p = try self.peek();
-                            if (std.ascii.isWhitespace(p) and p != '\n' and p != '\r') {
+                            if (std.ascii.isWhitespace(p)) {
                                 _ = self.pop() catch unreachable;
                                 continue;
                             }
