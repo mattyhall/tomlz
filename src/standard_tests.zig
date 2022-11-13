@@ -16,7 +16,6 @@ const failing_valid_tests = [_][]const u8{
     "comment/everywhere.toml",
     "string/raw-multiline.toml",
     "string/multiline-escaped-crlf.toml",
-    "string/escapes.toml",
     "string/escape-tricky.toml",
     "string/multiline.toml",
     "string/nl.toml",
