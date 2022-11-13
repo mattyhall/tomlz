@@ -108,6 +108,7 @@ pub const Lexer = struct {
             'r' => '\r',
             'f' => 10,
             '"' => '"',
+            '\'' => '\'',
             '\\' => '\\',
             else => {
                 self.diag = Diagnostic{ .loc = self.loc, .msg = "unexpected escape character" };
@@ -116,7 +117,7 @@ pub const Lexer = struct {
         };
     }
 
-    fn parseString(self: *Lexer) Error!TokLoc {
+    fn parseString(self: *Lexer, typ: enum { single, double }) Error!TokLoc {
         const loc = self.loc;
         var al = std.ArrayListUnmanaged(u8){};
         while (true) {
@@ -125,7 +126,14 @@ pub const Lexer = struct {
                 else => return err,
             };
             switch (c) {
-                '"' => return TokLoc{ .loc = loc, .tok = .{ .string = al.items } },
+                '"' => if (typ == .single)
+                    try al.append(self.arena.allocator(), c)
+                else
+                    return TokLoc{ .loc = loc, .tok = .{ .string = al.items } },
+                '\'' => if (typ == .double)
+                    try al.append(self.arena.allocator(), c)
+                else
+                    return TokLoc{ .loc = loc, .tok = .{ .string = al.items } },
                 '\\' => try al.append(self.arena.allocator(), try self.parseEscapeChar()),
                 else => {
                     if ((c >= 0x0 and c <= 0x8) or (c >= 0xA and c <= 0x1f) or c == 0x7f) {
@@ -320,7 +328,11 @@ pub const Lexer = struct {
             '\n' => return self.consume(.newline, loc),
             '"' => {
                 _ = self.pop() catch unreachable;
-                return try self.parseString();
+                return try self.parseString(.double);
+            },
+            '\'' => {
+                _ = self.pop() catch unreachable;
+                return try self.parseString(.single);
             },
             '-', '+', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' => return try self.parseNumber(),
             't' => return try self.parseKeyword("rue", .{ .boolean = true }),
@@ -393,11 +405,15 @@ test "normal keys" {
     try testTokens("foo.bar", &.{ .{ .key = "foo" }, .dot, .{ .key = "bar" } });
 }
 
-test "quotation work" {
+test "quotation works" {
     try testTokens("\"foo\"", &.{.{ .string = "foo" }});
     try testTokens("\"!!!\"", &.{.{ .string = "!!!" }});
     try testTokens("\"foo bar baz\"", &.{.{ .string = "foo bar baz" }});
     try testTokens("\"foo.bar.baz\"", &.{.{ .string = "foo.bar.baz" }});
+    try testTokens("'foo'", &.{.{ .string = "foo" }});
+    try testTokens("'!!!'", &.{.{ .string = "!!!" }});
+    try testTokens("'foo bar baz'", &.{.{ .string = "foo bar baz" }});
+    try testTokens("'foo.bar.baz'", &.{.{ .string = "foo.bar.baz" }});
 
     try testTokens(
         \\"foo \"bar\" baz"
