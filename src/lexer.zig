@@ -180,11 +180,17 @@ pub const Lexer = struct {
     fn parseMultiline(self: *Lexer, typ: Quotation) Error!TokLoc {
         const loc = self.loc;
         var al = std.ArrayListUnmanaged(u8){};
+        var first = true;
         while (true) {
             const c = self.pop() catch |err| switch (err) {
                 error.eof => return error.string_not_ended,
                 else => return err,
             };
+
+            if (c == '\n' and first) continue;
+
+            first = false;
+
             switch (c) {
                 '"' => if (typ == .single) {
                     try al.append(self.arena.allocator(), c);
@@ -247,6 +253,15 @@ pub const Lexer = struct {
                         try al.append(self.arena.allocator(), c);
                         continue;
                     }
+
+                    // A trailing slash in a multiline string means trim up to the next non-whitespace character
+                    var p = try self.peek();
+                    if (p == '\r' or p == '\n') {
+                        try self.skipWhitespaceAndComment();
+                        _ = self.pop() catch unreachable;
+                        continue;
+                    }
+
                     try self.parseEscapeChar(&al);
                 },
                 else => {
@@ -342,7 +357,19 @@ pub const Lexer = struct {
 
     fn skipComment(self: *Lexer) Error!void {
         while (true) {
-            const c = try self.peek();
+            var c = try self.peek();
+            if (c == '\r') {
+                _ = self.pop() catch unreachable;
+                c = try self.peek();
+                if (c != '\n') {
+                    self.diag = .{
+                        .loc = self.loc,
+                        .msg = "\\r can only appear at the end of a comment",
+                    };
+                    return error.unexpected_char;
+                }
+            }
+
             if (c == '\n') return;
 
             const loc = self.loc;
@@ -363,6 +390,24 @@ pub const Lexer = struct {
             if (c == '#') {
                 _ = self.pop() catch unreachable;
                 return try self.skipComment();
+            }
+
+            if (c == '\r') {
+                _ = self.pop() catch unreachable;
+                var p = self.peek() catch |err| switch (err) {
+                    error.eof => {
+                        self.diag = .{ .msg = "expected \\n after \\r", .loc = self.loc };
+                        return error.unexpected_char;
+                    },
+                    else => return err,
+                };
+
+                if (p != '\n') {
+                    self.diag = .{ .msg = "expected \\n after \\r", .loc = self.loc };
+                    return error.unexpected_char;
+                }
+
+                return;
             }
 
             if (c == '\n' or !std.ascii.isSpace(c)) return;
@@ -571,6 +616,7 @@ pub const Lexer = struct {
             error.eof => return null,
             else => return err,
         };
+
         const loc = self.loc;
 
         switch (c) {
@@ -582,6 +628,14 @@ pub const Lexer = struct {
             '{' => return self.consume(.open_curly_brace, loc),
             '}' => return self.consume(.close_curly_brace, loc),
             '\n' => return self.consume(.newline, loc),
+            '\r' => {
+                _ = self.pop() catch unreachable;
+
+                if (try self.peek() == '\n') return self.consume(.newline, loc);
+
+                self.diag = .{ .msg = "expect a \\n after a \\r", .loc = loc };
+                return error.unexpected_char;
+            },
             '"' => {
                 _ = self.pop() catch unreachable;
                 return try self.parseString(.double, force_key);
