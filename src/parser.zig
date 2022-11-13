@@ -132,7 +132,7 @@ pub const Parser = struct {
 
     fn peek(self: *Parser, force_key: bool) !lex.TokLoc {
         if (self.peeked) |tokloc| return tokloc;
-        
+
         self.peeked = try self.lexer.next(force_key);
         return self.peeked orelse error.eof;
     }
@@ -220,10 +220,7 @@ pub const Parser = struct {
             .open_square_bracket => try self.parseInlineArray(),
             .open_curly_brace => try self.parseInlineTable(),
             else => {
-                self.diag = .{
-                    .msg = "expected value type",
-                    .loc = tokloc.loc,
-                };
+                self.diag = .{ .msg = "expected value type", .loc = tokloc.loc };
                 return error.unexpected_token;
             },
         };
@@ -231,10 +228,13 @@ pub const Parser = struct {
         return val;
     }
 
-    fn skipNewlines(self: *Parser, force_key: bool) !void {
+    fn skipNewlines(self: *Parser, force_key: bool) !bool {
+        var had_newline = false;
         while ((try self.peek(force_key)).tok == .newline) {
+            had_newline = true;
             _ = self.pop(force_key) catch unreachable;
         }
+        return had_newline;
     }
 
     /// parseInlineArray parses a value of the form "[ <value-1>, <value-2>, ...]"
@@ -258,8 +258,24 @@ pub const Parser = struct {
             al.deinit(self.allocator);
         }
 
+        var had_newline = false;
+        var first = true;
+
         while (true) {
-            try self.skipNewlines(false);
+            had_newline = try self.skipNewlines(false) or had_newline;
+
+            if (had_newline and !first) {
+                const tokloc = try self.peek(false);
+                switch (tokloc.tok) {
+                    .close_square_bracket => _ = {
+                        _ = self.pop(false) catch unreachable;
+                        return Value{ .array = al };
+                    },
+                    else => {},
+                }
+            }
+
+            first = false;
 
             var v = try self.parseValue();
             {
@@ -267,7 +283,7 @@ pub const Parser = struct {
                 try al.append(self.allocator, v);
             }
 
-            try self.skipNewlines(false);
+            had_newline = try self.skipNewlines(false) or had_newline;
 
             const tokloc = try self.pop(false);
             switch (tokloc.tok) {
