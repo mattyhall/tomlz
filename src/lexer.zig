@@ -55,7 +55,7 @@ pub const Lexer = struct {
     index: usize,
     diag: ?Diagnostic,
 
-    pub const Error = error{ eof, unexpected_char, OutOfMemory, string_not_ended };
+    pub const Error = error{ eof, unexpected_char, OutOfMemory, string_not_ended, invalid_codepoint };
 
     pub fn init(allocator: std.mem.Allocator, src: []const u8) !Lexer {
         if (!std.unicode.utf8ValidateSlice(src))
@@ -96,17 +96,59 @@ pub const Lexer = struct {
         return c;
     }
 
+    fn parseUnicode(self: *Lexer, len: u4, al: *std.ArrayListUnmanaged(u8)) Error!void {
+        var i: usize = 1;
+        var codepoint: u21 = 0;
+        var buf: [16]u8 = undefined;
+        while (true) : (i += 1) {
+            const c = try self.peek();
+            if (c != '0') break;
+            _ = self.pop() catch unreachable;
+        }
+
+        while (true) : (i += 1) {
+            const c = try self.peek();
+            const n = std.fmt.parseInt(u21, &.{c}, 16) catch {
+                if (i == @intCast(usize, len) + 1) {
+                    const written = std.unicode.utf8Encode(codepoint, &buf) catch return error.invalid_codepoint;
+                    try al.appendSlice(self.arena.allocator(), buf[0..written]);
+                    return;
+                }
+
+                return error.unexpected_char;
+            };
+
+            _ = self.pop() catch unreachable;
+
+            if (std.math.maxInt(u21) < 16 * @intCast(u64, codepoint) + n) return error.invalid_codepoint;
+
+            codepoint = codepoint * 16 + n;
+            if (i == len) {
+                const written = std.unicode.utf8Encode(codepoint, &buf) catch return error.invalid_codepoint;
+                try al.appendSlice(self.arena.allocator(), buf[0..written]);
+                return;
+            }
+        }
+    }
+
     /// parseEscapeChar parses the valid escape codes allowed in TOML (i.e. those allowed in a string beginning with a
     /// backslash)
-    fn parseEscapeChar(self: *Lexer) Error!u8 {
-        defer _ = self.pop() catch unreachable;
-
-        return switch (try self.peek()) {
+    fn parseEscapeChar(self: *Lexer, al: *std.ArrayListUnmanaged(u8)) Error!void {
+        var c: u8 = switch (try self.peek()) {
             'b' => 8,
             't' => '\t',
             'n' => '\n',
             'r' => '\r',
             'f' => 10,
+            'e' => '\x1b',
+            'u' => {
+                _ = self.pop() catch unreachable;
+                return try self.parseUnicode(4, al);
+            },
+            'U' => {
+                _ = self.pop() catch unreachable;
+                return try self.parseUnicode(8, al);
+            },
             '"' => '"',
             '\'' => '\'',
             '\\' => '\\',
@@ -115,6 +157,10 @@ pub const Lexer = struct {
                 return error.unexpected_char;
             },
         };
+
+        _ = self.pop() catch unreachable;
+
+        try al.append(self.arena.allocator(), c);
     }
 
     fn parseString(self: *Lexer, typ: enum { single, double }) Error!TokLoc {
@@ -134,7 +180,13 @@ pub const Lexer = struct {
                     try al.append(self.arena.allocator(), c)
                 else
                     return TokLoc{ .loc = loc, .tok = .{ .string = al.items } },
-                '\\' => try al.append(self.arena.allocator(), try self.parseEscapeChar()),
+                '\\' => {
+                    if (typ == .single) {
+                        try al.append(self.arena.allocator(), c);
+                        continue;
+                    }
+                    try self.parseEscapeChar(&al);
+                },
                 else => {
                     if ((c >= 0x0 and c <= 0x8) or (c >= 0xA and c <= 0x1f) or c == 0x7f) {
                         self.diag = .{ .loc = loc, .msg = "unexpected control character in string" };
@@ -525,6 +577,11 @@ test "quotation works" {
 
     try testTokens("\"foo \\n bar\"", &.{.{ .string = "foo \n bar" }});
     try testTokens("\"foo \\t bar\"", &.{.{ .string = "foo \t bar" }});
+
+    try testTokens(
+        "'This string has a \\b backspace character.'",
+        &.{.{ .string = "This string has a \\b backspace character." }},
+    );
 }
 
 test "key/value" {

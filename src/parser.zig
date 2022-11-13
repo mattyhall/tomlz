@@ -248,6 +248,7 @@ pub const Parser = struct {
         not_table,
         string_not_ended,
         inline_tables_are_immutable,
+        invalid_codepoint,
     }!Value {
         var al = std.ArrayListUnmanaged(Value){};
         errdefer {
@@ -294,6 +295,7 @@ pub const Parser = struct {
         not_table,
         string_not_ended,
         inline_tables_are_immutable,
+        invalid_codepoint,
     }!Value {
         const curr = self.current_table;
 
