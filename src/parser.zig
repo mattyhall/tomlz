@@ -100,6 +100,18 @@ pub const Value = union(enum) {
         };
     }
 
+    fn emptyOtherThanTables(self: *Value) bool {
+        if (self.* != .table) return false;
+
+        var iter = self.table.table.iterator();
+        while (iter.next()) |entry| {
+            if (entry.value_ptr.* != .table) return false;
+            if (!entry.value_ptr.emptyOtherThanTables()) return false;
+        }
+
+        return true;
+    }
+
     fn deinit(self: *Value, allocator: std.mem.Allocator) void {
         switch (self.*) {
             Value.table => |*t| t.deinit(allocator),
@@ -378,7 +390,8 @@ pub const Parser = struct {
         for (key_path) |k, i| {
             if (i == key_path.len - 1) {
                 if (tbl.table.getPtr(k)) |val| {
-                    if (allow_exists) {
+                    const empty_other_than_tables = val.emptyOtherThanTables();
+                    if (allow_exists or empty_other_than_tables) {
                         if (val.* != .array)
                             return .{ .table = tbl, .value = val, .existed = true };
 
@@ -499,7 +512,7 @@ pub const Parser = struct {
         const new_loc = try self.parseKey(key, tokloc.loc, &al);
         var res = try self.createPath(al.items, new_loc, false, .header);
 
-        res.value.* = .{ .table = .{ .source = .header } };
+        if (!res.existed) res.value.* = .{ .table = .{ .source = .header } };
         self.current_table = &res.value.table;
 
         try self.expect(.close_square_bracket, "]");

@@ -30,7 +30,6 @@ const failing_valid_tests = [_][]const u8{
     "datetime/local-time.toml",
     "datetime/local.toml",
     "datetime/datetime.toml",
-    "table/without-super.toml",
 };
 
 var dbg = false;
