@@ -275,6 +275,11 @@ pub const Parser = struct {
                 }
             }
 
+            if (first and (try self.peek(false)).tok == .close_square_bracket) {
+                _ = self.pop(false) catch unreachable;
+                return Value{ .array = al };
+            }
+
             first = false;
 
             var v = try self.parseValue();
@@ -440,6 +445,10 @@ pub const Parser = struct {
         try self.expect(.equals, "=");
 
         val.* = try self.parseValue();
+        if (val.* == .array and val.*.array.items.len == 0) {
+            self.diag = .{ .msg = "inline arrays cannot be empty", .loc = loc};
+            return error.unexpected_token;
+        }
 
         const next = self.peek(false) catch |err| switch (err) {
             error.eof => return,

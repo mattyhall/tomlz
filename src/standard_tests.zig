@@ -23,7 +23,6 @@ const failing_valid_tests = [_][]const u8{
     "string/multiline-quotes.toml",
     "spec-example-1.toml",
     "array/array.toml",
-    "array/empty.toml",
     "array/string-quote-comma-2.toml",
     "array/strings.toml",
     "implicit-and-explicit-after.toml",
