@@ -47,6 +47,8 @@ pub const Diagnostic = struct {
     msg: []const u8,
 };
 
+const Quotation = enum { single, double };
+
 /// Lexer splits its given source TOML file into tokens
 pub const Lexer = struct {
     arena: std.heap.ArenaAllocator,
@@ -94,6 +96,18 @@ pub const Lexer = struct {
         }
 
         return c;
+    }
+
+    fn peek2(self: *Lexer) ?[]const u8 {
+        if (self.index + 1 >= self.source.len) return null;
+
+        return self.source[self.index .. self.index + 2];
+    }
+
+    fn peek3(self: *Lexer) ?[]const u8 {
+        if (self.index + 2 >= self.source.len) return null;
+
+        return self.source[self.index .. self.index + 3];
     }
 
     fn parseUnicode(self: *Lexer, len: u4, al: *std.ArrayListUnmanaged(u8)) Error!void {
@@ -163,7 +177,104 @@ pub const Lexer = struct {
         try al.append(self.arena.allocator(), c);
     }
 
-    fn parseString(self: *Lexer, typ: enum { single, double }) Error!TokLoc {
+    fn parseMultiline(self: *Lexer, typ: Quotation) Error!TokLoc {
+        const loc = self.loc;
+        var al = std.ArrayListUnmanaged(u8){};
+        while (true) {
+            const c = self.pop() catch |err| switch (err) {
+                error.eof => return error.string_not_ended,
+                else => return err,
+            };
+            switch (c) {
+                '"' => if (typ == .single) {
+                    try al.append(self.arena.allocator(), c);
+                } else {
+                    if (self.peek2()) |two| {
+                        if (!std.mem.eql(u8, two, "\"\"")) {
+                            try al.append(self.arena.allocator(), c);
+                            continue;
+                        }
+                    }
+
+                    // If we are here we have at least three quotes in a row. We need to keep taking quotes until we are
+                    // at the last three
+                    var i: usize = 0;
+                    while (self.peek3()) |three| {
+                        if (three[2] != c) break;
+
+                        _ = try self.pop();
+                        try al.append(self.arena.allocator(), c);
+
+                        i += 1;
+                        if (i == 2) break;
+                    }
+
+                    _ = self.pop() catch unreachable;
+                    _ = self.pop() catch unreachable;
+
+                    return TokLoc{ .loc = loc, .tok = .{ .string = al.items } };
+                },
+                '\'' => if (typ == .double) {
+                    try al.append(self.arena.allocator(), c);
+                } else {
+                    if (self.peek2()) |two| {
+                        if (!std.mem.eql(u8, two, "''")) {
+                            try al.append(self.arena.allocator(), c);
+                            continue;
+                        }
+                    }
+
+                    // If we are here we have at least three quotes in a row. We need to keep taking quotes until we are
+                    // at the last three
+                    var i: usize = 0;
+                    while (self.peek3()) |three| {
+                        if (three[2] != c) break;
+
+                        _ = try self.pop();
+                        try al.append(self.arena.allocator(), c);
+
+                        i += 1;
+                        if (i == 2) break;
+                    }
+
+                    _ = self.pop() catch unreachable;
+                    _ = self.pop() catch unreachable;
+
+                    return TokLoc{ .loc = loc, .tok = .{ .string = al.items } };
+                },
+                '\\' => {
+                    if (typ == .single) {
+                        try al.append(self.arena.allocator(), c);
+                        continue;
+                    }
+                    try self.parseEscapeChar(&al);
+                },
+                else => {
+                    if ((c >= 0x0 and c <= 0x8) or c == 0x0B or c == 0x0C or (c >= 0xE and c <= 0x1f) or c == 0x7f) {
+                        self.diag = .{ .loc = loc, .msg = "unexpected control character in string" };
+                        return error.unexpected_char;
+                    }
+
+                    try al.append(self.arena.allocator(), c);
+                },
+            }
+        }
+    }
+
+    fn parseString(self: *Lexer, typ: Quotation, force_key: bool) Error!TokLoc {
+        if (self.peek2()) |two| {
+            if ((typ == .double and std.mem.eql(u8, two, "\"\"")) or (std.mem.eql(u8, two, "''"))) {
+                if (force_key) {
+                    self.diag = .{ .msg = "cannot use a multiline string as a key", .loc = self.loc };
+                    return error.unexpected_char;
+                }
+
+                _ = self.pop() catch unreachable;
+                _ = self.pop() catch unreachable;
+                return try self.parseMultiline(typ);
+            }
+        }
+
         const loc = self.loc;
         var al = std.ArrayListUnmanaged(u8){};
         while (true) {
@@ -473,11 +584,11 @@ pub const Lexer = struct {
             '\n' => return self.consume(.newline, loc),
             '"' => {
                 _ = self.pop() catch unreachable;
-                return try self.parseString(.double);
+                return try self.parseString(.double, force_key);
             },
             '\'' => {
                 _ = self.pop() catch unreachable;
-                return try self.parseString(.single);
+                return try self.parseString(.single, force_key);
             },
             '-', '+', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' => {
                 if (force_key) return try self.parseKey();
@@ -582,6 +693,12 @@ test "quotation works" {
         "'This string has a \\b backspace character.'",
         &.{.{ .string = "This string has a \\b backspace character." }},
     );
+
+    try testTokens("\"\"\" foo bar baz \"\"\"", &.{.{ .string = " foo bar baz " }});
+    try testTokens("''' foo bar baz '''", &.{.{ .string = " foo bar baz " }});
+
+    try testTokens("\"\"\"\"\"\"\"", &.{.{ .string = "\"" }});
+    try testTokens("'''''''", &.{.{ .string = "'" }});
 }
 
 test "key/value" {

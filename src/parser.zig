@@ -446,7 +446,7 @@ pub const Parser = struct {
 
         val.* = try self.parseValue();
         if (val.* == .array and val.*.array.items.len == 0) {
-            self.diag = .{ .msg = "inline arrays cannot be empty", .loc = loc};
+            self.diag = .{ .msg = "inline arrays cannot be empty", .loc = loc };
             return error.unexpected_token;
         }
 
