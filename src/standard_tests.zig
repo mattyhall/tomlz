@@ -16,7 +16,6 @@ const failing_valid_tests = [_][]const u8{
     "comment/everywhere.toml",
     "spec-example-1.toml",
     "array/array.toml",
-    "array/string-quote-comma-2.toml",
     "implicit-and-explicit-after.toml",
     "example.toml",
     "spec-example-1-compact.toml",

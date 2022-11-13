@@ -264,7 +264,7 @@ pub const Parser = struct {
         while (true) {
             had_newline = try self.skipNewlines(false) or had_newline;
 
-            if (had_newline and !first) {
+            if (!first) {
                 const tokloc = try self.peek(false);
                 switch (tokloc.tok) {
                     .close_square_bracket => _ = {
@@ -904,11 +904,7 @@ test "inline array" {
 test "fail: inline array" {
     try expectErrorParse(error.eof, &.{ .{ .key = "foo" }, .equals, .open_square_bracket });
     try expectErrorParse(error.eof, &.{ .{ .key = "foo" }, .equals, .open_square_bracket, .{ .integer = 1 } });
-    try expectErrorParse(error.eof, &.{ .{ .key = "foo" }, .equals, .open_square_bracket, .{ .integer = 1 }, .comma });
-    try expectErrorParse(
-        error.unexpected_token,
-        &.{ .{ .key = "foo" }, .equals, .open_square_bracket, .{ .integer = 1 }, .comma, .close_square_bracket },
-    );
+    try expectErrorParse(error.eof, &.{ .{ .key = "foo" }, .equals, .open_square_bracket, .{ .integer = 1 } });
 }
 
 test "arrays" {
