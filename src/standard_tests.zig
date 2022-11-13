@@ -83,33 +83,47 @@ const failing_valid_tests = [_][]const u8{
     "datetime/local.toml",
     "datetime/datetime.toml",
     "table/names.toml",
-    "table/array-many.toml",
-    "table/array-one.toml",
-    "table/with-single-quotes.toml",
-    "table/array-nest.toml",
-    "table/array-implicit.toml",
-    "table/with-literal-string.toml",
-    "table/array-table-array.toml",
     "table/without-super.toml",
 };
 
+var dbg = false;
+
 fn jsonValueEquality(actual: *const std.json.Value, expected: *const std.json.Value) bool {
+    if (dbg) {
+        std.debug.print("====\n", .{});
+        actual.dump();
+        expected.dump();
+        std.debug.print("====\n", .{});
+    }
+
     switch (actual.*) {
         .String => |s| return std.mem.eql(u8, s, expected.String),
         .Integer => |i| return i == expected.Integer,
         .Bool => |a| return a == expected.Bool,
-        .Float, .Null, .NumberString => return false,
+        .Float => |f| return f == expected.Float,
+        .Null, .NumberString => return false,
         else => return false,
     }
 }
 
 pub fn jsonEquality(gpa: std.mem.Allocator, actual: *const std.json.Value, expected: *const std.json.Value) !bool {
     if (expected.* == .Object and expected.Object.contains("type")) {
+        var t = expected.Object.get("type") orelse unreachable;
         var s = expected.Object.get("value") orelse unreachable;
+
+        if (std.mem.eql(u8, t.String, "string")) {
+            if (actual.* != .String) return false;
+
+            return std.mem.eql(u8, actual.String, s.String);
+        }
+
         var p = std.json.Parser.init(gpa, false);
         defer p.deinit();
 
-        var tree = p.parse(s.String) catch return false;
+        var tree = p.parse(s.String) catch {
+            if (dbg) std.debug.print("could not parse '{s}'", .{s.String});
+            return false;
+        };
         defer tree.deinit();
 
         return jsonValueEquality(actual, &tree.root);
@@ -123,6 +137,7 @@ pub fn jsonEquality(gpa: std.mem.Allocator, actual: *const std.json.Value, expec
 
             for (arr_actual) |value_a, i| {
                 const value_e = arr_expected[i];
+                if (dbg) std.debug.print("index: {}\n", .{i});
                 if (!try jsonEquality(gpa, &value_a, &value_e)) return false;
             }
 
@@ -131,17 +146,24 @@ pub fn jsonEquality(gpa: std.mem.Allocator, actual: *const std.json.Value, expec
         .Object => {
             var tbl_a = actual.Object;
             var tbl_e = expected.Object;
-            if (tbl_a.count() != tbl_e.count()) return false;
+            if (tbl_a.count() != tbl_e.count()) {
+                if (dbg) std.debug.print("wrong count\n", .{});
+                return false;
+            }
 
             var it = tbl_a.iterator();
             while (it.next()) |entry_a| {
+                if (dbg) std.debug.print("key: {s}\n", .{entry_a.key_ptr.*});
                 const value_e = tbl_e.get(entry_a.key_ptr.*) orelse return false;
                 if (!try jsonEquality(gpa, entry_a.value_ptr, &value_e)) return false;
             }
 
             return true;
         },
-        else => return false,
+        else => {
+            if (dbg) std.debug.print("some other type\n", .{});
+            return false;
+        },
     }
 }
 
