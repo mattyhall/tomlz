@@ -23,7 +23,7 @@ pub fn main() !void {
     var table = p.parse() catch |err| {
         std.debug.print("error parsing {s}: {}\n", .{ std.os.argv[1], err });
         std.debug.print("{?}\n", .{p.diag});
-        return;
+        return err;
     };
     defer table.deinit(gpa);
 

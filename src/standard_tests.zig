@@ -25,7 +25,6 @@ const failing_valid_tests = [_][]const u8{
     "string/nl.toml",
     "string/multiline-quotes.toml",
     "spec-example-1.toml",
-    "array/bool.toml",
     "array/array.toml",
     "array/empty.toml",
     "array/string-quote-comma-2.toml",

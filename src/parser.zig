@@ -132,7 +132,7 @@ pub const Parser = struct {
 
     fn peek(self: *Parser, force_key: bool) !lex.TokLoc {
         if (self.peeked) |tokloc| return tokloc;
-
+        
         self.peeked = try self.lexer.next(force_key);
         return self.peeked orelse error.eof;
     }

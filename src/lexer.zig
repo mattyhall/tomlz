@@ -375,7 +375,7 @@ pub const Lexer = struct {
         if (self.source.len - self.index >= full_len + 1 and
             !std.ascii.isWhitespace(self.source[self.index + full_len]) and
             self.source[self.index + full_len] != '=' and self.source[self.index + full_len] != ',' and
-            self.source[self.index + full_len] != '}')
+            self.source[self.index + full_len] != '}' and self.source[self.index + full_len] != ']')
             return try self.parseKey();
 
         self.index += full_len;
