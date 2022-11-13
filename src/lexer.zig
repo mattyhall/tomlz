@@ -208,6 +208,48 @@ pub const Lexer = struct {
         }
     }
 
+    fn parseFloat(self: *Lexer, loc: Loc, sign: i64, base: u8, whole: i64) Error!TokLoc {
+        if (base != 10) {
+            self.diag = .{ .msg = "only decimal numbers can be floats", .loc = loc };
+            return error.unexpected_char;
+        }
+
+        var fractional: f64 = 0.0;
+        var i: f64 = 1.0;
+        var new_loc = loc;
+        const s = @intToFloat(f64, sign);
+        const n = @intToFloat(f64, whole);
+        var had_number = false;
+
+        while (true) {
+            const c = self.peek() catch |err| switch (err) {
+                error.eof => {
+                    if (had_number) return TokLoc{ .tok = .{ .float = n + s * fractional }, .loc = new_loc };
+
+                    self.diag = .{ .msg = "expected number after dot", .loc = new_loc };
+                    return error.unexpected_char;
+                },
+                else => return err,
+            };
+
+            if (!std.ascii.isAlphanumeric(c)) {
+                if (had_number) return TokLoc{ .tok = .{ .float = n + s * fractional }, .loc = new_loc };
+
+                self.diag = .{ .msg = "expected number after dot", .loc = new_loc };
+            }
+
+            _ = try self.pop();
+            had_number = true;
+
+            var digit = std.fmt.parseFloat(f64, &.{c}) catch {
+                self.diag = .{ .msg = "expected number", .loc = new_loc };
+                return error.unexpected_char;
+            };
+            fractional += digit * std.math.pow(f64, 10.0, -i);
+            i += 1.0;
+        }
+    }
+
     pub fn parseNumber(self: *Lexer) Error!TokLoc {
         var explicit_sign = false;
         var sign: i64 = 1;
@@ -227,7 +269,9 @@ pub const Lexer = struct {
 
         var loc = self.loc;
         var c = try self.pop();
+        var had_number = false;
         if (c == '0') {
+            had_number = true;
             const radix = self.peek() catch |err| switch (err) {
                 error.eof => return TokLoc{ .tok = .{ .integer = 0 }, .loc = loc },
                 else => return err,
@@ -236,6 +280,10 @@ pub const Lexer = struct {
                 'b' => base = 2,
                 'o' => base = 8,
                 'x' => base = 16,
+                '.' => {
+                    _ = try self.pop();
+                    return try self.parseFloat(loc, sign, base, 0);
+                },
                 else => {
                     if (std.ascii.isWhitespace(radix)) return TokLoc{ .tok = .{ .integer = 0 }, .loc = self.loc };
 
@@ -256,6 +304,15 @@ pub const Lexer = struct {
 
         var i: i64 = 0;
         while (true) {
+            if (c == '.') {
+                if (had_number) return try self.parseFloat(loc, sign, base, i);
+
+                self.diag = .{ .msg = "expected number (leading dot not allowed)", .loc = loc };
+                return error.unexpected_char;
+            }
+
+            had_number = true;
+
             var digit = std.fmt.parseInt(i64, &.{c}, base) catch {
                 self.diag = .{ .msg = "expected number", .loc = loc };
                 return error.unexpected_char;
@@ -267,7 +324,7 @@ pub const Lexer = struct {
                 error.eof => return TokLoc{ .tok = .{ .integer = i }, .loc = loc },
                 else => return err,
             };
-            if (!std.ascii.isAlphanumeric(c))
+            if (!std.ascii.isAlphanumeric(c) and c != '.')
                 return TokLoc{ .tok = .{ .integer = i }, .loc = loc };
 
             _ = self.pop() catch unreachable;
@@ -449,6 +506,13 @@ test "integers" {
     try testTokens("0x147abc", &.{.{ .integer = 0x147abc }});
     try testTokens("0o147", &.{.{ .integer = 0o147 }});
     try testTokens("0b10010011", &.{.{ .integer = 0b10010011 }});
+}
+
+test "floats" {
+    try testTokens("3.14", &.{.{ .float = 3.14 }});
+    try testTokens("0.1", &.{.{ .float = 0.1 }});
+    try testTokens("-3.14", &.{.{ .float = -3.14 }});
+    try testTokens("-0.1", &.{.{ .float = -0.1 }});
 }
 
 test "booleans" {

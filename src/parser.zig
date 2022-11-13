@@ -68,6 +68,7 @@ pub const Table = struct {
 /// Value represents a TOML value: i.e. an integer, string, float, boolean, table, array
 pub const Value = union(enum) {
     integer: i64,
+    float: f64,
     string: []const u8,
     array: ArrayBase,
     table: Table,
@@ -214,6 +215,7 @@ pub const Parser = struct {
         var val = switch (tokloc.tok) {
             .string => |s| Value{ .string = try self.allocator.dupe(u8, s) },
             .integer => |i| Value{ .integer = i },
+            .float => |f| Value{ .float = f },
             .boolean => |b| Value{ .boolean = b },
             .open_square_bracket => try self.parseInlineArray(),
             .open_curly_brace => try self.parseInlineTable(),

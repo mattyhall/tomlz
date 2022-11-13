@@ -6,6 +6,7 @@ pub fn tomlValueToJson(allocator: std.mem.Allocator, v: *parser.Value) !std.json
     return switch (v.*) {
         .string => |s| std.json.Value{ .String = s },
         .integer => |s| std.json.Value{ .Integer = s },
+        .float => |f| std.json.Value{ .Float = f },
         .boolean => |b| std.json.Value{ .Bool = b },
         .array => |*a| b: {
             var al = try std.json.Array.initCapacity(allocator, a.items.len);
