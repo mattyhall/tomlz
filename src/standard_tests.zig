@@ -19,9 +19,6 @@ const failing_valid_tests = [_][]const u8{
     "implicit-and-explicit-after.toml",
     "example.toml",
     "spec-example-1-compact.toml",
-    "float/exponent.toml",
-    "float/zero.toml",
-    "float/underscore.toml",
     "float/inf-and-nan.toml",
     "float/float.toml",
     "datetime/milliseconds.toml",
@@ -38,15 +35,20 @@ fn jsonValueEquality(actual: *const std.json.Value, expected: *const std.json.Va
     if (dbg) {
         std.debug.print("====\n", .{});
         actual.dump();
+        std.debug.print("\n", .{});
         expected.dump();
-        std.debug.print("====\n", .{});
+        std.debug.print("\n====\n", .{});
     }
 
     switch (actual.*) {
         .String => |s| return std.mem.eql(u8, s, expected.String),
         .Integer => |i| return i == expected.Integer,
         .Bool => |a| return a == expected.Bool,
-        .Float => |f| return f == expected.Float,
+        .Float => |f| return switch (expected.*) {
+            .Float => |f2| f == f2,
+            .Integer => |i| f == @intToFloat(f64, i),
+            else => false,
+        },
         .Null, .NumberString => return false,
         else => return false,
     }

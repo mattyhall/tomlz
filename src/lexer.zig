@@ -426,6 +426,55 @@ pub const Lexer = struct {
         }
     }
 
+    fn parseExponent(self: *Lexer, base: f64) Error!TokLoc {
+        var pow: usize = 0;
+        var had_number = false;
+        var sign: f64 = 1.0;
+
+        var c = self.peek() catch {
+            self.diag = .{ .msg = "expected number after e", .loc = self.loc };
+            return error.unexpected_char;
+        };
+        switch (c) {
+            '+' => _ = self.pop() catch unreachable,
+            '-' => {
+                _ = self.pop() catch unreachable;
+                sign = -1.0;
+            },
+            else => {},
+        }
+
+        while (true) {
+            c = self.peek() catch |err| switch (err) {
+                error.eof => break,
+                else => return err,
+            };
+
+            if (c == '_') {
+                if (!had_number) break;
+
+                _ = self.pop() catch unreachable;
+                continue;
+            }
+
+            if (c < '0' or c > '9') break;
+
+            _ = self.pop() catch unreachable;
+            had_number = true;
+            pow = pow * 10 + (std.fmt.parseInt(usize, &.{c}, 10) catch unreachable);
+        }
+
+        if (!had_number) {
+            self.diag = .{ .msg = "expected number after e", .loc = self.loc };
+            return error.unexpected_char;
+        }
+
+        return TokLoc{
+            .tok = .{ .float = base * std.math.pow(f64, 10, sign * @intToFloat(f64, pow)) },
+            .loc = self.loc,
+        };
+    }
+
     fn parseFloat(self: *Lexer, loc: Loc, sign: i64, base: u8, whole: i64) Error!TokLoc {
         if (base != 10) {
             self.diag = .{ .msg = "only decimal numbers can be floats", .loc = loc };
@@ -450,10 +499,26 @@ pub const Lexer = struct {
                 else => return err,
             };
 
-            if (!std.ascii.isAlphanumeric(c)) {
+            if (had_number and (c == 'e' or c == 'E')) {
+                _ = self.pop() catch unreachable;
+                return try self.parseExponent(n + s * fractional);
+            }
+
+            if (c == '_') {
+                if (!had_number) {
+                    self.diag = .{ .msg = "expected number after dot", .loc = new_loc };
+                    return error.unexpected_char;
+                }
+
+                _ = self.pop() catch unreachable;
+                continue;
+            }
+
+            if (c < '0' or c > '9') {
                 if (had_number) return TokLoc{ .tok = .{ .float = n + s * fractional }, .loc = new_loc };
 
                 self.diag = .{ .msg = "expected number after dot", .loc = new_loc };
+                return error.unexpected_char;
             }
 
             _ = try self.pop();
@@ -497,6 +562,10 @@ pub const Lexer = struct {
             switch (radix) {
                 'b' => base = 2,
                 'o' => base = 8,
+                'e', 'E' => {
+                    _ = self.pop() catch unreachable;
+                    return try self.parseExponent(0.0);
+                },
                 'x' => base = 16,
                 '.' => {
                     _ = try self.pop();
@@ -536,6 +605,8 @@ pub const Lexer = struct {
 
                 return try self.parseFloat(loc, sign, base, i);
             }
+
+            if ((c == 'e' or c == 'E') and base != 16) return try self.parseExponent(@intToFloat(f64, i));
 
             if (c == '_') {
                 if (last_c == @as(u8, '_')) {
@@ -800,6 +871,7 @@ test "floats" {
     try testTokens("0.1", &.{.{ .float = 0.1 }});
     try testTokens("-3.14", &.{.{ .float = -3.14 }});
     try testTokens("-0.1", &.{.{ .float = -0.1 }});
+    try testTokens("0e0", &.{.{ .float = 0.0 }});
 }
 
 test "booleans" {
