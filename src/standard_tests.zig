@@ -18,7 +18,6 @@ const failing_valid_tests = [_][]const u8{
     "implicit-and-explicit-after.toml",
     "example.toml",
     "spec-example-1-compact.toml",
-    "float/inf-and-nan.toml",
     "datetime/milliseconds.toml",
     "datetime/local-date.toml",
     "datetime/timezone.toml",
@@ -61,6 +60,16 @@ pub fn jsonEquality(gpa: std.mem.Allocator, actual: *const std.json.Value, expec
             if (actual.* != .String) return false;
 
             return std.mem.eql(u8, actual.String, s.String);
+        }
+
+        if (std.mem.eql(u8, t.String, "float")) {
+            if (actual.* != .Float) return false;
+
+            if (std.mem.eql(u8, s.String, "inf") or (std.mem.eql(u8, s.String, "+inf") or (std.mem.eql(u8, s.String, "-inf"))))
+                return std.math.inf(f64) == actual.Float;
+
+            if (std.mem.eql(u8, s.String, "nan") or (std.mem.eql(u8, s.String, "+nan") or (std.mem.eql(u8, s.String, "-nan"))))
+                return std.math.isNan(actual.Float);
         }
 
         var p = std.json.Parser.init(gpa, false);

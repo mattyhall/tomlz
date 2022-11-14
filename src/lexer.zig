@@ -442,6 +442,21 @@ pub const Lexer = struct {
             else => {},
         }
 
+        if (self.source.len - self.index > 3) {
+            if (std.mem.eql(u8, self.source[self.index .. self.index + 3], "nan")) {
+                _ = self.pop() catch unreachable;
+                _ = self.pop() catch unreachable;
+                _ = self.pop() catch unreachable;
+                return TokLoc{ .tok = .{ .float = std.math.nan(f64) }, .loc = self.loc };
+            }
+            if (std.mem.eql(u8, self.source[self.index .. self.index + 3], "inf")) {
+                _ = self.pop() catch unreachable;
+                _ = self.pop() catch unreachable;
+                _ = self.pop() catch unreachable;
+                return TokLoc{ .tok = .{ .float = std.math.inf(f64) }, .loc = self.loc };
+            }
+        }
+
         var c = try self.pop();
         var had_number = false;
         var is_float = false;
@@ -630,6 +645,14 @@ pub const Lexer = struct {
             'f' => {
                 if (force_key) return try self.parseKey();
                 return try self.parseKeyword("alse", .{ .boolean = false });
+            },
+            'n' => {
+                if (force_key) return try self.parseKey();
+                return try self.parseKeyword("an", .{ .float = std.math.nan(f64) });
+            },
+            'i' => {
+                if (force_key) return try self.parseKey();
+                return try self.parseKeyword("nf", .{ .float = std.math.inf(f64) });
             },
             else => return try self.parseKey(),
         }
