@@ -426,121 +426,13 @@ pub const Lexer = struct {
         }
     }
 
-    fn parseExponent(self: *Lexer, base: f64) Error!TokLoc {
-        var pow: usize = 0;
-        var had_number = false;
-        var sign: f64 = 1.0;
-
-        var c = self.peek() catch {
-            self.diag = .{ .msg = "expected number after e", .loc = self.loc };
-            return error.unexpected_char;
-        };
-        switch (c) {
-            '+' => _ = self.pop() catch unreachable,
-            '-' => {
-                _ = self.pop() catch unreachable;
-                sign = -1.0;
-            },
-            else => {},
-        }
-
-        while (true) {
-            c = self.peek() catch |err| switch (err) {
-                error.eof => break,
-                else => return err,
-            };
-
-            if (c == '_') {
-                if (!had_number) break;
-
-                _ = self.pop() catch unreachable;
-                continue;
-            }
-
-            if (c < '0' or c > '9') break;
-
-            _ = self.pop() catch unreachable;
-            had_number = true;
-            pow = pow * 10 + (std.fmt.parseInt(usize, &.{c}, 10) catch unreachable);
-        }
-
-        if (!had_number) {
-            self.diag = .{ .msg = "expected number after e", .loc = self.loc };
-            return error.unexpected_char;
-        }
-
-        return TokLoc{
-            .tok = .{ .float = base * std.math.pow(f64, 10, sign * @intToFloat(f64, pow)) },
-            .loc = self.loc,
-        };
-    }
-
-    fn parseFloat(self: *Lexer, loc: Loc, sign: i64, base: u8, whole: i64) Error!TokLoc {
-        if (base != 10) {
-            self.diag = .{ .msg = "only decimal numbers can be floats", .loc = loc };
-            return error.unexpected_char;
-        }
-
-        var fractional: f64 = 0.0;
-        var i: f64 = 1.0;
-        var new_loc = loc;
-        const s = @intToFloat(f64, sign);
-        const n = @intToFloat(f64, whole);
-        var had_number = false;
-
-        while (true) {
-            const c = self.peek() catch |err| switch (err) {
-                error.eof => {
-                    if (had_number) return TokLoc{ .tok = .{ .float = n + s * fractional }, .loc = new_loc };
-
-                    self.diag = .{ .msg = "expected number after dot", .loc = new_loc };
-                    return error.unexpected_char;
-                },
-                else => return err,
-            };
-
-            if (had_number and (c == 'e' or c == 'E')) {
-                _ = self.pop() catch unreachable;
-                return try self.parseExponent(n + s * fractional);
-            }
-
-            if (c == '_') {
-                if (!had_number) {
-                    self.diag = .{ .msg = "expected number after dot", .loc = new_loc };
-                    return error.unexpected_char;
-                }
-
-                _ = self.pop() catch unreachable;
-                continue;
-            }
-
-            if (c < '0' or c > '9') {
-                if (had_number) return TokLoc{ .tok = .{ .float = n + s * fractional }, .loc = new_loc };
-
-                self.diag = .{ .msg = "expected number after dot", .loc = new_loc };
-                return error.unexpected_char;
-            }
-
-            _ = try self.pop();
-            had_number = true;
-
-            var digit = std.fmt.parseFloat(f64, &.{c}) catch {
-                self.diag = .{ .msg = "expected number", .loc = new_loc };
-                return error.unexpected_char;
-            };
-            fractional += digit * std.math.pow(f64, 10.0, -i);
-            i += 1.0;
-        }
-    }
-
     pub fn parseNumber(self: *Lexer) Error!TokLoc {
         var explicit_sign = false;
-        var sign: i64 = 1;
         var base: u8 = 10;
+        const original_index = self.index;
         switch (self.peek() catch unreachable) {
             '-' => {
                 explicit_sign = true;
-                sign = -1;
                 _ = self.pop() catch unreachable;
             },
             '+' => {
@@ -550,27 +442,21 @@ pub const Lexer = struct {
             else => {},
         }
 
-        var loc = self.loc;
         var c = try self.pop();
         var had_number = false;
+        var is_float = false;
         if (c == '0') {
             had_number = true;
             const radix = self.peek() catch |err| switch (err) {
-                error.eof => return TokLoc{ .tok = .{ .integer = 0 }, .loc = loc },
+                error.eof => return TokLoc{ .tok = .{ .integer = 0 }, .loc = self.loc },
                 else => return err,
             };
             switch (radix) {
                 'b' => base = 2,
                 'o' => base = 8,
-                'e', 'E' => {
-                    _ = self.pop() catch unreachable;
-                    return try self.parseExponent(0.0);
-                },
+                'e', 'E' => is_float = true,
                 'x' => base = 16,
-                '.' => {
-                    _ = try self.pop();
-                    return try self.parseFloat(loc, sign, base, 0);
-                },
+                '.' => is_float = true,
                 else => {
                     if (std.ascii.isWhitespace(radix)) return TokLoc{ .tok = .{ .integer = 0 }, .loc = self.loc };
 
@@ -579,77 +465,85 @@ pub const Lexer = struct {
                 },
             }
 
-            if (explicit_sign and radix != 10) {
+            if (explicit_sign and base != 10) {
                 self.diag = .{ .msg = "only base 10 numbers can have an explicit sign", .loc = self.loc };
                 return error.unexpected_char;
             }
 
-            _ = self.pop() catch unreachable;
-
             c = try self.pop();
         }
 
-        var i: i64 = 0;
         var last_c: ?u8 = null;
         while (true) {
             if (c == '.') {
-                if (last_c == @as(u8, '_')) {
-                    self.diag = .{ .msg = "dot after underscore not allowed", .loc = loc };
-                    return error.unexpected_char;
-                }
-
                 if (!had_number) {
-                    self.diag = .{ .msg = "expected number (leading dot not allowed)", .loc = loc };
+                    self.diag = .{ .msg = "cannot have leading '.' in float", .loc = self.loc };
                     return error.unexpected_char;
                 }
 
-                return try self.parseFloat(loc, sign, base, i);
+                is_float = true;
             }
 
-            if ((c == 'e' or c == 'E') and base != 16) return try self.parseExponent(@intToFloat(f64, i));
-
-            if (c == '_') {
-                if (last_c == @as(u8, '_')) {
-                    self.diag = .{ .msg = "double underscores not allowed", .loc = loc };
+            if ((c == 'e' or c == 'E') and base != 16) {
+                if (last_c == @as(u8, '.')) {
+                    self.diag = .{ .msg = "number must follow dot", .loc = self.loc };
                     return error.unexpected_char;
                 }
 
-                if (last_c == null) {
-                    self.diag = .{ .msg = "underscore not allowed after base", .loc = loc };
-                    return error.unexpected_char;
-                }
-            } else {
-                had_number = true;
-
-                var digit = std.fmt.parseInt(i64, &.{c}, base) catch {
-                    self.diag = .{ .msg = "expected number", .loc = loc };
-                    return error.unexpected_char;
-                };
-
-                i = i * base + sign * digit;
+                is_float = true;
             }
 
-            loc = self.loc;
             last_c = c;
             c = self.peek() catch |err| switch (err) {
                 error.eof => {
-                    if (last_c != @as(u8, '_')) return TokLoc{ .tok = .{ .integer = i }, .loc = loc };
+                    if (last_c != @as(u8, '_')) break;
 
-                    self.diag = .{ .msg = "trailing underscores not allowed", .loc = loc };
+                    self.diag = .{ .msg = "trailing underscores not allowed", .loc = self.loc };
                     return error.unexpected_char;
                 },
                 else => return err,
             };
 
-            if (!std.ascii.isAlphanumeric(c) and c != '.' and c != '_') {
-                if (last_c != @as(u8, '_')) return TokLoc{ .tok = .{ .integer = i }, .loc = loc };
-
-                self.diag = .{ .msg = "trailing underscores not allowed", .loc = loc };
+            if (c == @as(u8, '_') and last_c == @as(u8, '_')) {
+                self.diag = .{ .msg = "double underscores not allowed", .loc = self.loc };
                 return error.unexpected_char;
             }
 
+            if ((c == '+' or c == '-') and last_c != @as(u8, 'e') and last_c != @as(u8, 'E')) {
+                self.diag = .{ .msg = "'+' and '-' can only follow an 'e'", .loc = self.loc };
+                return error.unexpected_char;
+            }
+
+            if (!std.ascii.isAlphanumeric(c) and c != '.' and c != '_' and c != '+' and c != '-') {
+                if (last_c != @as(u8, '_')) break;
+
+                self.diag = .{ .msg = "trailing underscores not allowed", .loc = self.loc };
+                return error.unexpected_char;
+            }
+
+            had_number = true;
             _ = self.pop() catch unreachable;
         }
+
+        var slice = self.source[original_index..self.index];
+        if (slice[slice.len - 1] == '.') {
+            self.diag = .{ .msg = "trailing dot not allowed", .loc = self.loc };
+            return error.unexpected_char;
+        }
+
+        if (is_float) return TokLoc{
+            .tok = .{ .float = std.fmt.parseFloat(f64, slice) catch {
+                return error.unexpected_char;
+            } },
+            .loc = self.loc,
+        };
+
+        return TokLoc{
+            .tok = .{ .integer = std.fmt.parseInt(i64, slice, 0) catch {
+                return error.unexpected_char;
+            } },
+            .loc = self.loc,
+        };
     }
 
     fn parseKeyword(self: *Lexer, rest: []const u8, tok: Tok) Error!TokLoc {
@@ -872,6 +766,7 @@ test "floats" {
     try testTokens("-3.14", &.{.{ .float = -3.14 }});
     try testTokens("-0.1", &.{.{ .float = -0.1 }});
     try testTokens("0e0", &.{.{ .float = 0.0 }});
+    try testTokens("-1E-1", &.{.{ .float = -0.1 }});
 }
 
 test "booleans" {

@@ -12,7 +12,6 @@ const failing_invalid_tests = [_][]const u8{
 };
 
 const failing_valid_tests = [_][]const u8{
-    "comment/tricky.toml",
     "comment/everywhere.toml",
     "spec-example-1.toml",
     "array/array.toml",
@@ -20,7 +19,6 @@ const failing_valid_tests = [_][]const u8{
     "example.toml",
     "spec-example-1-compact.toml",
     "float/inf-and-nan.toml",
-    "float/float.toml",
     "datetime/milliseconds.toml",
     "datetime/local-date.toml",
     "datetime/timezone.toml",
