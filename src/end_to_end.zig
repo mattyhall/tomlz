@@ -9,8 +9,8 @@ pub fn tomlValueToJson(allocator: std.mem.Allocator, v: *parser.Value) !std.json
         .float => |f| std.json.Value{ .Float = f },
         .boolean => |b| std.json.Value{ .Bool = b },
         .array => |*a| b: {
-            var al = try std.json.Array.initCapacity(allocator, a.items.len);
-            for (a.items) |*value| {
+            var al = try std.json.Array.initCapacity(allocator, a.array.items.len);
+            for (a.array.items) |*value| {
                 al.appendAssumeCapacity(try tomlValueToJson(allocator, value));
             }
             break :b std.json.Value{ .Array = al };

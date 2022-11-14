@@ -5,7 +5,6 @@ const parser = @import("parser.zig");
 const e2e = @import("end_to_end.zig");
 
 const failing_invalid_tests = [_][]const u8{
-    "array/extending-table.toml",
     "table/rrbrace.toml",
     "table/llbrace.toml",
 };

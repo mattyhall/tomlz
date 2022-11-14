@@ -47,8 +47,8 @@ pub const Table = struct {
         return &v.value_ptr.table;
     }
 
-    pub fn getOrPutArray(self: *Table, allocator: std.mem.Allocator, key: []const u8) !*Value.ArrayBase {
-        var v = try self.table.getOrPutValue(allocator, key, .{ .array = .{} });
+    pub fn getOrPutArray(self: *Table, allocator: std.mem.Allocator, key: []const u8, source: Array.Source) !*Array {
+        var v = try self.table.getOrPutValue(allocator, key, .{ .array = .{ .source = source } });
         if (v.value_ptr.* != .array) return error.not_array;
 
         return &v.value_ptr.array;
@@ -65,24 +65,30 @@ pub const Table = struct {
     }
 };
 
+pub const Array = struct {
+    array: Base = .{},
+    source: Source,
+
+    const Base = std.ArrayListUnmanaged(Value);
+    const Source = enum { @"inline", header };
+};
+
 /// Value represents a TOML value: i.e. an integer, string, float, boolean, table, array
 pub const Value = union(enum) {
     integer: i64,
     float: f64,
     string: []const u8,
-    array: ArrayBase,
+    array: Array,
     table: Table,
     boolean: bool,
-
-    const ArrayBase = std.ArrayListUnmanaged(Value);
 
     fn dupe(self: *const Value, allocator: std.mem.Allocator) !Value {
         return switch (self.*) {
             .string => |s| Value{ .string = try allocator.dupe(u8, s) },
-            .array => |al| b: {
-                var new = try std.ArrayListUnmanaged(Value).initCapacity(allocator, al.items.len);
-                new.appendSliceAssumeCapacity(al.items);
-                break :b Value{ .array = new };
+            .array => |a| b: {
+                var new = try std.ArrayListUnmanaged(Value).initCapacity(allocator, a.array.items.len);
+                new.appendSliceAssumeCapacity(a.array.items);
+                break :b Value{ .array = .{ .array = new, .source = a.source } };
             },
             .table => |t| b: {
                 var new_table = Table{ .source = t.source };
@@ -115,11 +121,11 @@ pub const Value = union(enum) {
     fn deinit(self: *Value, allocator: std.mem.Allocator) void {
         switch (self.*) {
             Value.table => |*t| t.deinit(allocator),
-            Value.array => |*arr| {
-                for (arr.items) |*item| {
+            Value.array => |*a| {
+                for (a.array.items) |*item| {
                     item.deinit(allocator);
                 }
-                arr.deinit(allocator);
+                a.array.deinit(allocator);
             },
             Value.string => |*s| allocator.free(s.*),
             else => {},
@@ -259,7 +265,7 @@ pub const Parser = struct {
         not_table_or_array,
         not_table,
         string_not_ended,
-        inline_tables_are_immutable,
+        inline_tables_and_arrays_are_immutable,
         invalid_codepoint,
     }!Value {
         var al = std.ArrayListUnmanaged(Value){};
@@ -281,7 +287,7 @@ pub const Parser = struct {
                 switch (tokloc.tok) {
                     .close_square_bracket => _ = {
                         _ = self.pop(false) catch unreachable;
-                        return Value{ .array = al };
+                        return Value{ .array = .{ .array = al, .source = .@"inline" } };
                     },
                     else => {},
                 }
@@ -289,7 +295,7 @@ pub const Parser = struct {
 
             if (first and (try self.peek(false)).tok == .close_square_bracket) {
                 _ = self.pop(false) catch unreachable;
-                return Value{ .array = al };
+                return Value{ .array = .{ .array = al, .source = .@"inline" } };
             }
 
             first = false;
@@ -306,7 +312,7 @@ pub const Parser = struct {
             switch (tokloc.tok) {
                 .comma => {},
                 .newline => {},
-                .close_square_bracket => return Value{ .array = al },
+                .close_square_bracket => return Value{ .array = .{ .array = al, .source = .@"inline" } },
                 else => {
                     self.diag = .{
                         .msg = "expected one of '\n', ',' or ']' after list entry",
@@ -327,7 +333,7 @@ pub const Parser = struct {
         key_already_exists,
         not_table,
         string_not_ended,
-        inline_tables_are_immutable,
+        inline_tables_and_arrays_are_immutable,
         invalid_codepoint,
     }!Value {
         const curr = self.current_table;
@@ -395,14 +401,15 @@ pub const Parser = struct {
                         if (val.* != .array)
                             return .{ .table = tbl, .value = val, .existed = true };
 
-                        var tbl_in_array = &val.array.items[val.array.items.len - 1];
+                        if (val.array.source == .@"inline") {
+                            self.diag = .{ .msg = "cannot extend inline arrays", .loc = loc };
+                            return error.inline_tables_and_arrays_are_immutable;
+                        }
+                        var tbl_in_array = &val.array.array.items[val.array.array.items.len - 1];
                         return .{ .table = &tbl_in_array.table, .value = tbl_in_array, .existed = true };
                     }
 
-                    self.diag = .{
-                        .msg = "key already exists",
-                        .loc = loc,
-                    };
+                    self.diag = .{ .msg = "key already exists", .loc = loc };
                     return error.key_already_exists;
                 }
 
@@ -421,11 +428,18 @@ pub const Parser = struct {
                     .table => |*t| {
                         if (t.source == .@"inline") {
                             self.diag = .{ .msg = "inline tables are immutable", .loc = loc };
-                            return error.inline_tables_are_immutable;
+                            return error.inline_tables_and_arrays_are_immutable;
                         }
                         tbl = t;
                     },
-                    .array => |*a| tbl = &a.items[a.items.len - 1].table,
+                    .array => |*a| {
+                        if (a.source == .@"inline") {
+                            self.diag = .{ .msg = "cannot extend inline arrays", .loc = loc };
+                            return error.inline_tables_and_arrays_are_immutable;
+                        }
+
+                        tbl = &a.array.items[a.array.items.len - 1].table;
+                    },
                     else => {
                         self.diag = .{ .msg = "key already exists and is not a table or array", .loc = loc };
                         return error.not_table_or_array;
@@ -458,7 +472,7 @@ pub const Parser = struct {
         try self.expect(.equals, "=");
 
         val.* = try self.parseValue();
-        if (val.* == .array and val.*.array.items.len == 0) {
+        if (val.* == .array and val.*.array.array.items.len == 0) {
             self.diag = .{ .msg = "inline arrays cannot be empty", .loc = loc };
             return error.unexpected_token;
         }
@@ -573,13 +587,13 @@ pub const Parser = struct {
         var arr = b: {
             errdefer self.allocator.free(res.key);
 
-            break :b try res.table.getOrPutArray(self.allocator, res.key);
+            break :b try res.table.getOrPutArray(self.allocator, res.key, .header);
         };
 
         defer if (existed) self.allocator.free(res.key);
 
-        try arr.append(self.allocator, .{ .table = .{ .source = .header } });
-        self.current_table = &arr.items[arr.items.len - 1].table;
+        try arr.array.append(self.allocator, .{ .table = .{ .source = .header } });
+        self.current_table = &arr.array.items[arr.array.items.len - 1].table;
 
         try self.expect(.close_square_bracket, "]");
         try self.expect(.close_square_bracket, "]");
@@ -868,7 +882,7 @@ test "inline array" {
 
         try testing.expectEqualSlices(Value, 
             &.{ .{ .integer = 1 }, .{ .integer = 2 }},
-            table.table.get("foo").?.array.items);
+            table.table.get("foo").?.array.array.items);
     }
 
     {
@@ -880,7 +894,7 @@ test "inline array" {
 
         try testing.expectEqualSlices(Value, 
             &.{ .{ .integer = 1 }, .{ .integer = 2 }},
-            table.table.get("foo").?.array.items);
+            table.table.get("foo").?.array.array.items);
     }
     
     {
@@ -890,9 +904,9 @@ test "inline array" {
             .close_square_bracket });
         defer table.deinit(testing.allocator);
 
-        try testing.expectEqual(@as(usize, 2), table.table.get("foo").?.array.items.len);
-        try testing.expectEqual(Value{ .integer = 1}, table.table.get("foo").?.array.items[0]);
-        try testing.expectEqualStrings("bar", table.table.get("foo").?.array.items[1].string);
+        try testing.expectEqual(@as(usize, 2), table.table.get("foo").?.array.array.items.len);
+        try testing.expectEqual(Value{ .integer = 1}, table.table.get("foo").?.array.array.items[0]);
+        try testing.expectEqualStrings("bar", table.table.get("foo").?.array.array.items[1].string);
 
     }
 
@@ -904,11 +918,11 @@ test "inline array" {
             .close_square_bracket });
         defer table.deinit(testing.allocator);
 
-        try testing.expectEqual(@as(usize, 2), table.table.get("foo").?.array.items.len);
-        try testing.expectEqual(Value{ .integer = 1}, table.table.get("foo").?.array.items[0]);
+        try testing.expectEqual(@as(usize, 2), table.table.get("foo").?.array.array.items.len);
+        try testing.expectEqual(Value{ .integer = 1}, table.table.get("foo").?.array.array.items[0]);
         try testing.expectEqualSlices(Value, 
             &.{ .{ .integer = 2 }, .{ .integer = 3 }},
-            table.table.get("foo").?.array.items[1].array.items);
+            table.table.get("foo").?.array.array.items[1].array.array.items);
 
     }
     // zig fmt: on
@@ -932,7 +946,7 @@ test "arrays" {
         });
         defer table.deinit(testing.allocator);
         try testing.expectEqual(@as(usize, 1), table.table.count());
-        const arr =  table.table.get("foo").?.array;
+        const arr =  table.table.get("foo").?.array.array;
         try testing.expectEqual(@as(usize, 2), arr.items.len);
         try testing.expectEqualStrings("a", arr.items[0].table.table.get("bar").?.string);
         try testing.expectEqualStrings("b", arr.items[1].table.table.get("baz").?.string);
@@ -952,7 +966,7 @@ test "arrays" {
         });
         defer table.deinit(testing.allocator);
         try testing.expectEqual(@as(usize, 1), table.table.count());
-        const arr =  table.table.get("foo").?.table.table.get("bar").?.array;
+        const arr =  table.table.get("foo").?.table.table.get("bar").?.array.array;
         try testing.expectEqual(@as(usize, 2), arr.items.len);
         try testing.expectEqual(@as(i64, 1), arr.items[0].table.table.get("a").?.integer);
         try testing.expectEqual(@as(i64, 2), arr.items[1].table.table.get("b").?.integer);
@@ -999,7 +1013,7 @@ test "array of tables" {
         });
         defer table.deinit(testing.allocator);
         try testing.expectEqual(@as(usize, 1), table.table.count());
-        const arr = table.table.get("foo").?.array;
+        const arr = table.table.get("foo").?.array.array;
         try testing.expectEqual(@as(usize, 1), arr.items.len);
         try testing.expectEqualStrings("a", arr.items[0].table.table.get("bar").?.string);
         const inner_table = arr.items[0].table.table.get("baz").?.table;
