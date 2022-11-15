@@ -90,7 +90,7 @@ pub const Table = struct {
 
     fn getOrPutTable(self: *Table, allocator: std.mem.Allocator, key: []const u8, value: Table) !*Table {
         var v = try self.table.getOrPutValue(allocator, key, .{ .table = value });
-        if (v.value_ptr.* != .table) return error.not_table;
+        if (v.value_ptr.* != .table) return error.NotTable;
 
         return &v.value_ptr.table;
     }
@@ -252,7 +252,7 @@ pub const Parser = struct {
         if (self.peeked) |tokloc| return tokloc;
 
         self.peeked = try self.lexer.next(force_key);
-        return self.peeked orelse error.eof;
+        return self.peeked orelse error.EOF;
     }
 
     fn pop(self: *Parser, force_key: bool) !lex.TokLoc {
@@ -262,7 +262,7 @@ pub const Parser = struct {
         }
 
         const next = try self.lexer.next(force_key);
-        return next orelse error.eof;
+        return next orelse error.EOF;
     }
 
     /// expect asserts that the current token has the same tag as expected.
@@ -275,7 +275,7 @@ pub const Parser = struct {
                 .msg = "expected '" ++ str ++ "'",
                 .loc = actual.loc,
             };
-            return error.unexpected_token;
+            return error.UnexpectedToken;
         }
     }
 
@@ -300,7 +300,7 @@ pub const Parser = struct {
                         .msg = "expected '.', ']' or '=' after key",
                         .loc = next.loc,
                     };
-                    return error.unexpected_token;
+                    return error.UnexpectedToken;
                 },
             }
 
@@ -316,7 +316,7 @@ pub const Parser = struct {
                         .msg = "expected key after '.'",
                         .loc = key_tok.loc,
                     };
-                    return error.unexpected_token;
+                    return error.UnexpectedToken;
                 },
             };
 
@@ -339,7 +339,7 @@ pub const Parser = struct {
             .open_curly_brace => try self.parseInlineTable(),
             else => {
                 self.diag = .{ .msg = "expected value type", .loc = tokloc.loc };
-                return error.unexpected_token;
+                return error.UnexpectedToken;
             },
         };
 
@@ -358,15 +358,15 @@ pub const Parser = struct {
     /// parseInlineArray parses a value of the form "[ <value-1>, <value-2>, ...]"
     fn parseInlineArray(self: *Parser) error{
         OutOfMemory,
-        unexpected_token,
-        unexpected_char,
-        eof,
-        key_already_exists,
-        not_table_or_array,
-        not_table,
-        string_not_ended,
-        inline_tables_and_arrays_are_immutable,
-        invalid_codepoint,
+        UnexpectedToken,
+        UnexpectedChar,
+        EOF,
+        KeyAlreadyExists,
+        NotTableOrArray,
+        NotTable,
+        StringNotEnded,
+        InlineTablesAndArraysAreImmutable,
+        InvalidCodepoint,
     }!Value {
         var al = std.ArrayListUnmanaged(Value){};
         errdefer {
@@ -418,7 +418,7 @@ pub const Parser = struct {
                         .msg = "expected one of '\n', ',' or ']' after list entry",
                         .loc = tokloc.loc,
                     };
-                    return error.unexpected_char;
+                    return error.UnexpectedChar;
                 },
             }
         }
@@ -426,15 +426,15 @@ pub const Parser = struct {
 
     fn parseInlineTable(self: *Parser) error{
         OutOfMemory,
-        unexpected_token,
-        unexpected_char,
-        eof,
-        not_table_or_array,
-        key_already_exists,
-        not_table,
-        string_not_ended,
-        inline_tables_and_arrays_are_immutable,
-        invalid_codepoint,
+        UnexpectedToken,
+        UnexpectedChar,
+        EOF,
+        NotTableOrArray,
+        KeyAlreadyExists,
+        NotTable,
+        StringNotEnded,
+        InlineTablesAndArraysAreImmutable,
+        InvalidCodepoint,
     }!Value {
         const curr = self.current_table;
 
@@ -452,13 +452,13 @@ pub const Parser = struct {
                     if (first) return .{ .table = tbl };
 
                     self.diag = .{ .msg = "trailing comma not allowed in inline table", .loc = tokloc.loc };
-                    return error.unexpected_token;
+                    return error.UnexpectedToken;
                 },
                 .key => |k| try self.parseAssignment(tokloc.loc, k),
                 .string => |s| try self.parseAssignment(tokloc.loc, s),
                 else => {
                     self.diag = .{ .msg = "expected a key in inline table", .loc = tokloc.loc };
-                    return error.unexpected_token;
+                    return error.UnexpectedToken;
                 },
             }
 
@@ -473,7 +473,7 @@ pub const Parser = struct {
                 .comma => _ = self.pop(true) catch unreachable,
                 else => {
                     self.diag = .{ .msg = "expected a comma after assignment in inline table", .loc = next.loc };
-                    return error.unexpected_token;
+                    return error.UnexpectedToken;
                 },
             }
         }
@@ -503,14 +503,14 @@ pub const Parser = struct {
 
                         if (val.array.source == .@"inline") {
                             self.diag = .{ .msg = "cannot extend inline arrays", .loc = loc };
-                            return error.inline_tables_and_arrays_are_immutable;
+                            return error.InlineTablesAndArraysAreImmutable;
                         }
                         var tbl_in_array = &val.array.array.items[val.array.array.items.len - 1];
                         return .{ .table = &tbl_in_array.table, .value = tbl_in_array, .existed = true };
                     }
 
                     self.diag = .{ .msg = "key already exists", .loc = loc };
-                    return error.key_already_exists;
+                    return error.KeyAlreadyExists;
                 }
 
                 var val = tbl.table.getPtr(k) orelse b: {
@@ -528,21 +528,21 @@ pub const Parser = struct {
                     .table => |*t| {
                         if (t.source == .@"inline") {
                             self.diag = .{ .msg = "inline tables are immutable", .loc = loc };
-                            return error.inline_tables_and_arrays_are_immutable;
+                            return error.InlineTablesAndArraysAreImmutable;
                         }
                         tbl = t;
                     },
                     .array => |*a| {
                         if (a.source == .@"inline") {
                             self.diag = .{ .msg = "cannot extend inline arrays", .loc = loc };
-                            return error.inline_tables_and_arrays_are_immutable;
+                            return error.InlineTablesAndArraysAreImmutable;
                         }
 
                         tbl = &a.array.items[a.array.items.len - 1].table;
                     },
                     else => {
                         self.diag = .{ .msg = "key already exists and is not a table or array", .loc = loc };
-                        return error.not_table_or_array;
+                        return error.NotTableOrArray;
                     },
                 }
             } else {
@@ -574,19 +574,19 @@ pub const Parser = struct {
         val.* = try self.parseValue();
         if (val.* == .array and val.*.array.array.items.len == 0) {
             self.diag = .{ .msg = "inline arrays cannot be empty", .loc = loc };
-            return error.unexpected_token;
+            return error.UnexpectedToken;
         }
 
         const next = self.peek(false) catch |err| switch (err) {
-            error.eof => return,
+            error.EOF => return,
             else => return err,
         };
 
         switch (next.tok) {
             .newline, .comma, .close_curly_brace => return,
             else => {
-                self.diag = .{ .msg = "expected comma, newline or eof after assignment", .loc = next.loc };
-                return error.unexpected_token;
+                self.diag = .{ .msg = "expected comma, newline or EOF after assignment", .loc = next.loc };
+                return error.UnexpectedToken;
             },
         }
     }
@@ -596,7 +596,7 @@ pub const Parser = struct {
     fn parseAssignmentEatNewline(self: *Parser, loc: lex.Loc, key: []const u8) !void {
         try self.parseAssignment(loc, key);
         self.expect(.newline, "\n") catch |err| switch (err) {
-            error.eof => return,
+            error.EOF => return,
             else => return err,
         };
     }
@@ -613,7 +613,7 @@ pub const Parser = struct {
             .string => |s| s,
             else => {
                 self.diag = .{ .msg = "expected key inside of square brackets", .loc = tokloc.loc };
-                return error.unexpected_token;
+                return error.UnexpectedToken;
             },
         };
 
@@ -657,7 +657,7 @@ pub const Parser = struct {
                 .msg = "key already exists and is not a table",
                 .loc = new_loc,
             };
-            return error.not_table;
+            return error.NotTable;
         }
 
         if (!res.existed) res.value.* = .{ .table = .{ .source = .header } };
@@ -678,7 +678,7 @@ pub const Parser = struct {
             .string => |s| s,
             else => {
                 self.diag = .{ .msg = "expected key inside of square brackets", .loc = tokloc.loc };
-                return error.unexpected_token;
+                return error.UnexpectedToken;
             },
         };
 
@@ -703,7 +703,7 @@ pub const Parser = struct {
     pub fn parse(self: *Parser) !Table {
         while (true) {
             const tokloc = self.pop(true) catch |err| switch (err) {
-                error.eof => {
+                error.EOF => {
                     const table = self.top_level_table.*;
                     self.allocator.destroy(self.top_level_table);
 
@@ -735,7 +735,7 @@ pub const Parser = struct {
                         .msg = "expected key",
                         .loc = tokloc.loc,
                     };
-                    return error.unexpected_token;
+                    return error.UnexpectedToken;
                 },
             }
         }
@@ -864,12 +864,12 @@ test "default table assignment" {
 }
 
 test "fail: default table assignment" {
-    try expectErrorParse(error.unexpected_token, &.{.equals});
-    try expectErrorParse(error.unexpected_token, &.{ .{ .key = "foo" }, .newline });
-    try expectErrorParse(error.unexpected_token, &.{ .{ .string = "foo" }, .equals, .{ .string = "a" }, .{ .key = "bar" }, .equals, .{ .string = "b" } });
-    try expectErrorParse(error.unexpected_token, &.{ .{ .key = "foo" }, .equals, .{ .key = "a" } });
-    try expectErrorParse(error.unexpected_token, &.{ .{ .integer = 147 }, .equals, .{ .string = "a" } });
-    try expectErrorParse(error.unexpected_token, &.{ .{ .boolean = true }, .equals, .{ .string = "a" } });
+    try expectErrorParse(error.UnexpectedToken, &.{.equals});
+    try expectErrorParse(error.UnexpectedToken, &.{ .{ .key = "foo" }, .newline });
+    try expectErrorParse(error.UnexpectedToken, &.{ .{ .string = "foo" }, .equals, .{ .string = "a" }, .{ .key = "bar" }, .equals, .{ .string = "b" } });
+    try expectErrorParse(error.UnexpectedToken, &.{ .{ .key = "foo" }, .equals, .{ .key = "a" } });
+    try expectErrorParse(error.UnexpectedToken, &.{ .{ .integer = 147 }, .equals, .{ .string = "a" } });
+    try expectErrorParse(error.UnexpectedToken, &.{ .{ .boolean = true }, .equals, .{ .string = "a" } });
 }
 
 test "dotted assignment" {
@@ -904,7 +904,7 @@ test "dotted assignment" {
 }
 
 test "fail: dotted assignment" {
-    try expectErrorParse(error.key_already_exists, &.{
+    try expectErrorParse(error.KeyAlreadyExists, &.{
         .{ .key = "foo" }, .dot, .{ .key = "bar" }, .equals, .{ .string = "a" }, .newline,
         .{ .key = "foo" }, .dot, .{ .key = "bar" }, .equals, .{ .string = "b" }, .newline,
     });
@@ -967,8 +967,8 @@ test "table header" {
 }
 
 test "fail: table header" {
-    try expectErrorParse(error.eof, &.{ .open_square_bracket, .{ .key = "foo" } });
-    try expectErrorParse(error.unexpected_token, &.{ .open_square_bracket, .{ .key = "foo" }, .equals });
+    try expectErrorParse(error.EOF, &.{ .open_square_bracket, .{ .key = "foo" } });
+    try expectErrorParse(error.UnexpectedToken, &.{ .open_square_bracket, .{ .key = "foo" }, .equals });
 }
 
 test "inline array" {
@@ -1025,9 +1025,9 @@ test "inline array" {
 }
 
 test "fail: inline array" {
-    try expectErrorParse(error.eof, &.{ .{ .key = "foo" }, .equals, .open_square_bracket });
-    try expectErrorParse(error.eof, &.{ .{ .key = "foo" }, .equals, .open_square_bracket, .{ .integer = 1 } });
-    try expectErrorParse(error.eof, &.{ .{ .key = "foo" }, .equals, .open_square_bracket, .{ .integer = 1 } });
+    try expectErrorParse(error.EOF, &.{ .{ .key = "foo" }, .equals, .open_square_bracket });
+    try expectErrorParse(error.EOF, &.{ .{ .key = "foo" }, .equals, .open_square_bracket, .{ .integer = 1 } });
+    try expectErrorParse(error.EOF, &.{ .{ .key = "foo" }, .equals, .open_square_bracket, .{ .integer = 1 } });
 }
 
 test "arrays" {
@@ -1071,15 +1071,15 @@ test "arrays" {
 }
 
 test "fail: arrays" {
-    try expectErrorParse(error.eof, &.{ .open_square_bracket, .open_square_bracket });
-    try expectErrorParse(error.eof, &.{ .open_square_bracket, .open_square_bracket, .{ .key = "foo" } });
+    try expectErrorParse(error.EOF, &.{ .open_square_bracket, .open_square_bracket });
+    try expectErrorParse(error.EOF, &.{ .open_square_bracket, .open_square_bracket, .{ .key = "foo" } });
     try expectErrorParse(
-        error.eof,
+        error.EOF,
         &.{ .open_square_bracket, .open_square_bracket, .{ .key = "foo" }, .close_square_bracket },
     );
 
     // zig fmt: off
-    try expectErrorParse(error.key_already_exists, &.{
+    try expectErrorParse(error.KeyAlreadyExists, &.{
             .open_square_bracket, .open_square_bracket, .{ .key="foo" }, .close_square_bracket, .close_square_bracket, .newline,
             .{ .key = "bar"}, .equals, .{ .string = "a" }, .newline,
 
@@ -1160,19 +1160,19 @@ test "inline tables" {
 
 test "fail: inline tables" {
     // zig fmt: off
-    try expectErrorParse(error.unexpected_token, &.{
+    try expectErrorParse(error.UnexpectedToken, &.{
             .{ .key = "foo" }, .equals, .open_curly_brace,
                 .{ .key = "bar"}, .equals, .{ .string = "a" }, .comma,
             .close_curly_brace,
     });
 
-    try expectErrorParse(error.unexpected_token, &.{
+    try expectErrorParse(error.UnexpectedToken, &.{
             .{ .key = "foo" }, .equals, .open_curly_brace, .newline,
                 .{ .key = "bar"}, .equals, .{ .string = "a" },
             .close_curly_brace,
     });
 
-    try expectErrorParse(error.unexpected_token, &.{
+    try expectErrorParse(error.UnexpectedToken, &.{
             .{ .key = "foo" }, .equals, .open_curly_brace,
                 .{ .key = "bar"}, .equals, .{ .string = "a" }, .comma, .newline,
             .close_curly_brace,

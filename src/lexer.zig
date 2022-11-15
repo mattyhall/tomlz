@@ -57,7 +57,7 @@ pub const Lexer = struct {
     index: usize,
     diag: ?Diagnostic,
 
-    pub const Error = error{ eof, unexpected_char, OutOfMemory, string_not_ended, invalid_codepoint };
+    pub const Error = error{ EOF, UnexpectedChar, OutOfMemory, StringNotEnded, InvalidCodepoint };
 
     pub fn init(allocator: std.mem.Allocator, src: []const u8) !Lexer {
         if (!std.unicode.utf8ValidateSlice(src))
@@ -73,7 +73,7 @@ pub const Lexer = struct {
                 .loc = .{ .line = self.loc.line + 1, .col = 1 },
                 .msg = "end of file",
             };
-            return error.eof;
+            return error.EOF;
         }
 
         return self.source[self.index];
@@ -85,7 +85,7 @@ pub const Lexer = struct {
                 .loc = .{ .line = self.loc.line + 1, .col = 1 },
                 .msg = "end of file",
             };
-            return error.eof;
+            return error.EOF;
         }
 
         const c = self.source[self.index];
@@ -124,21 +124,21 @@ pub const Lexer = struct {
             const c = try self.peek();
             const n = std.fmt.parseInt(u21, &.{c}, 16) catch {
                 if (i == @intCast(usize, len) + 1) {
-                    const written = std.unicode.utf8Encode(codepoint, &buf) catch return error.invalid_codepoint;
+                    const written = std.unicode.utf8Encode(codepoint, &buf) catch return error.InvalidCodepoint;
                     try al.appendSlice(self.arena.allocator(), buf[0..written]);
                     return;
                 }
 
-                return error.unexpected_char;
+                return error.UnexpectedChar;
             };
 
             _ = self.pop() catch unreachable;
 
-            if (std.math.maxInt(u21) < 16 * @intCast(u64, codepoint) + n) return error.invalid_codepoint;
+            if (std.math.maxInt(u21) < 16 * @intCast(u64, codepoint) + n) return error.InvalidCodepoint;
 
             codepoint = codepoint * 16 + n;
             if (i == len) {
-                const written = std.unicode.utf8Encode(codepoint, &buf) catch return error.invalid_codepoint;
+                const written = std.unicode.utf8Encode(codepoint, &buf) catch return error.InvalidCodepoint;
                 try al.appendSlice(self.arena.allocator(), buf[0..written]);
                 return;
             }
@@ -168,7 +168,7 @@ pub const Lexer = struct {
             '\\' => '\\',
             else => {
                 self.diag = Diagnostic{ .loc = self.loc, .msg = "unexpected escape character" };
-                return error.unexpected_char;
+                return error.UnexpectedChar;
             },
         };
 
@@ -183,7 +183,7 @@ pub const Lexer = struct {
         var first = true;
         while (true) {
             const c = self.pop() catch |err| switch (err) {
-                error.eof => return error.string_not_ended,
+                error.EOF => return error.StringNotEnded,
                 else => return err,
             };
 
@@ -259,7 +259,7 @@ pub const Lexer = struct {
 
                     if (std.ascii.isWhitespace(p)) {
                         try self.skipWhitespaceAndComment();
-                        if (self.pop() catch unreachable != '\n') return error.unexpected_char;
+                        if (self.pop() catch unreachable != '\n') return error.UnexpectedChar;
 
                         while (true) {
                             p = try self.peek();
@@ -277,7 +277,7 @@ pub const Lexer = struct {
                 else => {
                     if ((c >= 0x0 and c <= 0x8) or c == 0x0B or c == 0x0C or (c >= 0xE and c <= 0x1f) or c == 0x7f) {
                         self.diag = .{ .loc = loc, .msg = "unexpected control character in string" };
-                        return error.unexpected_char;
+                        return error.UnexpectedChar;
                     }
 
                     try al.append(self.arena.allocator(), c);
@@ -291,7 +291,7 @@ pub const Lexer = struct {
             if ((typ == .double and std.mem.eql(u8, two, "\"\"")) or (std.mem.eql(u8, two, "''"))) {
                 if (force_key) {
                     self.diag = .{ .msg = "cannot use a multiline string as a key", .loc = self.loc };
-                    return error.unexpected_char;
+                    return error.UnexpectedChar;
                 }
 
                 _ = self.pop() catch unreachable;
@@ -304,7 +304,7 @@ pub const Lexer = struct {
         var al = std.ArrayListUnmanaged(u8){};
         while (true) {
             const c = self.pop() catch |err| switch (err) {
-                error.eof => return error.string_not_ended,
+                error.EOF => return error.StringNotEnded,
                 else => return err,
             };
             switch (c) {
@@ -326,7 +326,7 @@ pub const Lexer = struct {
                 else => {
                     if ((c >= 0x0 and c <= 0x8) or (c >= 0xA and c <= 0x1f) or c == 0x7f) {
                         self.diag = .{ .loc = loc, .msg = "unexpected control character in string" };
-                        return error.unexpected_char;
+                        return error.UnexpectedChar;
                     }
 
                     try al.append(self.arena.allocator(), c);
@@ -342,7 +342,7 @@ pub const Lexer = struct {
         while (true) {
             const c = self.peek() catch |err| {
                 switch (err) {
-                    error.eof => return TokLoc{ .loc = loc, .tok = .{ .key = al.items } },
+                    error.EOF => return TokLoc{ .loc = loc, .tok = .{ .key = al.items } },
                     else => return err,
                 }
             };
@@ -358,7 +358,7 @@ pub const Lexer = struct {
                     .loc = self.loc,
                     .msg = "expected one of '\t', '\r', ' ', '.', '=', ']' after a key",
                 };
-                return error.unexpected_char;
+                return error.UnexpectedChar;
             }
 
             return TokLoc{ .loc = loc, .tok = .{ .key = al.items } };
@@ -376,7 +376,7 @@ pub const Lexer = struct {
                         .loc = self.loc,
                         .msg = "\\r can only appear at the end of a comment",
                     };
-                    return error.unexpected_char;
+                    return error.UnexpectedChar;
                 }
             }
 
@@ -388,7 +388,7 @@ pub const Lexer = struct {
             // permitted in comments."
             if ((c >= 0x0 and c <= 0x8) or (c >= 0xA and c <= 0x1f) or c == 0x7f) {
                 self.diag = .{ .loc = loc, .msg = "unexpected control character in comment" };
-                return error.unexpected_char;
+                return error.UnexpectedChar;
             }
         }
     }
@@ -405,16 +405,16 @@ pub const Lexer = struct {
             if (c == '\r') {
                 _ = self.pop() catch unreachable;
                 var p = self.peek() catch |err| switch (err) {
-                    error.eof => {
+                    error.EOF => {
                         self.diag = .{ .msg = "expected \\n after \\r", .loc = self.loc };
-                        return error.unexpected_char;
+                        return error.UnexpectedChar;
                     },
                     else => return err,
                 };
 
                 if (p != '\n') {
                     self.diag = .{ .msg = "expected \\n after \\r", .loc = self.loc };
-                    return error.unexpected_char;
+                    return error.UnexpectedChar;
                 }
 
                 return;
@@ -463,7 +463,7 @@ pub const Lexer = struct {
         if (c == '0') {
             had_number = true;
             const radix = self.peek() catch |err| switch (err) {
-                error.eof => return TokLoc{ .tok = .{ .integer = 0 }, .loc = self.loc },
+                error.EOF => return TokLoc{ .tok = .{ .integer = 0 }, .loc = self.loc },
                 else => return err,
             };
             switch (radix) {
@@ -476,13 +476,13 @@ pub const Lexer = struct {
                     if (std.ascii.isWhitespace(radix)) return TokLoc{ .tok = .{ .integer = 0 }, .loc = self.loc };
 
                     self.diag = .{ .msg = "expected 'b', 'o' or 'x' after '0'", .loc = self.loc };
-                    return error.unexpected_char;
+                    return error.UnexpectedChar;
                 },
             }
 
             if (explicit_sign and base != 10) {
                 self.diag = .{ .msg = "only base 10 numbers can have an explicit sign", .loc = self.loc };
-                return error.unexpected_char;
+                return error.UnexpectedChar;
             }
 
             c = try self.pop();
@@ -493,7 +493,7 @@ pub const Lexer = struct {
             if (c == '.') {
                 if (!had_number) {
                     self.diag = .{ .msg = "cannot have leading '.' in float", .loc = self.loc };
-                    return error.unexpected_char;
+                    return error.UnexpectedChar;
                 }
 
                 is_float = true;
@@ -502,7 +502,7 @@ pub const Lexer = struct {
             if ((c == 'e' or c == 'E') and base != 16) {
                 if (last_c == @as(u8, '.')) {
                     self.diag = .{ .msg = "number must follow dot", .loc = self.loc };
-                    return error.unexpected_char;
+                    return error.UnexpectedChar;
                 }
 
                 is_float = true;
@@ -510,30 +510,30 @@ pub const Lexer = struct {
 
             last_c = c;
             c = self.peek() catch |err| switch (err) {
-                error.eof => {
+                error.EOF => {
                     if (last_c != @as(u8, '_')) break;
 
                     self.diag = .{ .msg = "trailing underscores not allowed", .loc = self.loc };
-                    return error.unexpected_char;
+                    return error.UnexpectedChar;
                 },
                 else => return err,
             };
 
             if (c == @as(u8, '_') and last_c == @as(u8, '_')) {
                 self.diag = .{ .msg = "double underscores not allowed", .loc = self.loc };
-                return error.unexpected_char;
+                return error.UnexpectedChar;
             }
 
             if ((c == '+' or c == '-') and last_c != @as(u8, 'e') and last_c != @as(u8, 'E')) {
                 self.diag = .{ .msg = "'+' and '-' can only follow an 'e'", .loc = self.loc };
-                return error.unexpected_char;
+                return error.UnexpectedChar;
             }
 
             if (!std.ascii.isAlphanumeric(c) and c != '.' and c != '_' and c != '+' and c != '-') {
                 if (last_c != @as(u8, '_')) break;
 
                 self.diag = .{ .msg = "trailing underscores not allowed", .loc = self.loc };
-                return error.unexpected_char;
+                return error.UnexpectedChar;
             }
 
             had_number = true;
@@ -543,19 +543,19 @@ pub const Lexer = struct {
         var slice = self.source[original_index..self.index];
         if (slice[slice.len - 1] == '.') {
             self.diag = .{ .msg = "trailing dot not allowed", .loc = self.loc };
-            return error.unexpected_char;
+            return error.UnexpectedChar;
         }
 
         if (is_float) return TokLoc{
             .tok = .{ .float = std.fmt.parseFloat(f64, slice) catch {
-                return error.unexpected_char;
+                return error.UnexpectedChar;
             } },
             .loc = self.loc,
         };
 
         return TokLoc{
             .tok = .{ .integer = std.fmt.parseInt(i64, slice, 0) catch {
-                return error.unexpected_char;
+                return error.UnexpectedChar;
             } },
             .loc = self.loc,
         };
@@ -598,12 +598,12 @@ pub const Lexer = struct {
         self.arena = std.heap.ArenaAllocator.init(child);
 
         self.skipWhitespaceAndComment() catch |err| switch (err) {
-            error.eof => return null,
+            error.EOF => return null,
             else => return err,
         };
 
         const c = self.peek() catch |err| switch (err) {
-            error.eof => return null,
+            error.EOF => return null,
             else => return err,
         };
 
@@ -624,7 +624,7 @@ pub const Lexer = struct {
                 if (try self.peek() == '\n') return self.consume(.newline, loc);
 
                 self.diag = .{ .msg = "expect a \\n after a \\r", .loc = loc };
-                return error.unexpected_char;
+                return error.UnexpectedChar;
             },
             '"' => {
                 _ = self.pop() catch unreachable;
