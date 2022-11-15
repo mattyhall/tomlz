@@ -35,7 +35,7 @@ pub const Table = struct {
     pub fn contains(self: *const Table, key: []const u8) bool {
         return self.table.get(key) != null;
     }
-    
+
     pub fn getInteger(self: *const Table, key: []const u8) ?i64 {
         const val = self.table.get(key) orelse return null;
         switch (val) {
@@ -119,9 +119,57 @@ pub const Array = struct {
 
     const Base = std.ArrayListUnmanaged(Value);
     const Source = enum { @"inline", header };
-    
+
     pub fn items(self: *const Array) []const Value {
         return self.array.items;
+    }
+
+    pub fn getInteger(self: *const Array, index: usize) ?i64 {
+        if (index >= self.array.items.len) return null;
+        switch (self.array.items[index]) {
+            .integer => |i| return i,
+            else => return null,
+        }
+    }
+
+    pub fn getFloat(self: *const Array, index: usize) ?f64 {
+        if (index >= self.array.items.len) return null;
+        switch (self.array.items[index]) {
+            .float => |f| return f,
+            else => return null,
+        }
+    }
+
+    pub fn getBoolean(self: *const Array, index: usize) ?bool {
+        if (index >= self.array.items.len) return null;
+        switch (self.array.items[index]) {
+            .boolean => |b| return b,
+            else => return null,
+        }
+    }
+
+    pub fn getString(self: *const Array, index: usize) ?[]const u8 {
+        if (index >= self.array.items.len) return null;
+        switch (self.array.items[index]) {
+            .string => |s| return s,
+            else => return null,
+        }
+    }
+
+    pub fn getTable(self: *const Array, index: usize) ?Table {
+        if (index >= self.array.items.len) return null;
+        switch (self.array.items[index]) {
+            .table => |t| return t,
+            else => return null,
+        }
+    }
+
+    pub fn getArray(self: *const Array, index: usize) ?Array {
+        if (index >= self.array.items.len) return null;
+        switch (self.array.items[index]) {
+            .array => |a| return a,
+            else => return null,
+        }
     }
 };
 
@@ -954,7 +1002,7 @@ test "inline array" {
 
         try testing.expectEqual(@as(usize, 2), table.getArray("foo").?.items().len);
         try testing.expectEqual(Value{ .integer = 1}, table.getArray("foo").?.items()[0]);
-        try testing.expectEqualStrings("bar", table.getArray("foo").?.items()[1].string);
+        try testing.expectEqualStrings("bar", table.getArray("foo").?.getString(1).?);
 
     }
 
