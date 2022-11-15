@@ -32,22 +32,70 @@ pub const Table = struct {
 
     const TableBase = std.StringHashMapUnmanaged(Value);
 
-    pub fn hasKey(self: *Table, key: []const u8) bool {
+    pub fn contains(self: *const Table, key: []const u8) bool {
         return self.table.get(key) != null;
     }
+    
+    pub fn getInteger(self: *const Table, key: []const u8) ?i64 {
+        const val = self.table.get(key) orelse return null;
+        switch (val) {
+            .integer => |i| return i,
+            else => return null,
+        }
+    }
 
-    pub fn insert(self: *Table, allocator: std.mem.Allocator, key: []const u8, value: Value) !void {
+    pub fn getFloat(self: *const Table, key: []const u8) ?f64 {
+        const val = self.table.get(key) orelse return null;
+        switch (val) {
+            .float => |f| return f,
+            else => return null,
+        }
+    }
+
+    pub fn getBool(self: *const Table, key: []const u8) ?bool {
+        const val = self.table.get(key) orelse return null;
+        switch (val) {
+            .boolean => |b| return b,
+            else => return null,
+        }
+    }
+
+    pub fn getString(self: *const Table, key: []const u8) ?[]const u8 {
+        const val = self.table.get(key) orelse return null;
+        switch (val) {
+            .string => |s| return s,
+            else => return null,
+        }
+    }
+
+    pub fn getArray(self: *const Table, key: []const u8) ?Array {
+        const val = self.table.get(key) orelse return null;
+        switch (val) {
+            .array => |a| return a,
+            else => return null,
+        }
+    }
+
+    pub fn getTable(self: *const Table, key: []const u8) ?Table {
+        const val = self.table.get(key) orelse return null;
+        switch (val) {
+            .table => |t| return t,
+            else => return null,
+        }
+    }
+
+    fn insert(self: *Table, allocator: std.mem.Allocator, key: []const u8, value: Value) !void {
         return try self.table.put(allocator, key, value);
     }
 
-    pub fn getOrPutTable(self: *Table, allocator: std.mem.Allocator, key: []const u8, value: Table) !*Table {
+    fn getOrPutTable(self: *Table, allocator: std.mem.Allocator, key: []const u8, value: Table) !*Table {
         var v = try self.table.getOrPutValue(allocator, key, .{ .table = value });
         if (v.value_ptr.* != .table) return error.not_table;
 
         return &v.value_ptr.table;
     }
 
-    pub fn getOrPutArray(self: *Table, allocator: std.mem.Allocator, key: []const u8, source: Array.Source) !*Array {
+    fn getOrPutArray(self: *Table, allocator: std.mem.Allocator, key: []const u8, source: Array.Source) !*Array {
         var v = try self.table.getOrPutValue(allocator, key, .{ .array = .{ .source = source } });
         if (v.value_ptr.* != .array) return error.not_array;
 
@@ -71,6 +119,10 @@ pub const Array = struct {
 
     const Base = std.ArrayListUnmanaged(Value);
     const Source = enum { @"inline", header };
+    
+    pub fn items(self: *const Array) []const Value {
+        return self.array.items;
+    }
 };
 
 /// Value represents a TOML value: i.e. an integer, string, float, boolean, table, array
@@ -583,7 +635,7 @@ pub const Parser = struct {
         };
 
         var res = try self.parseArrayHeaderKey(key, tokloc.loc);
-        const existed = res.table.hasKey(res.key);
+        const existed = res.table.contains(res.key);
         var arr = b: {
             errdefer self.allocator.free(res.key);
 
@@ -778,7 +830,7 @@ test "dotted assignment" {
         var table = try testParse(&.{ .{ .key = "foo"}, .dot, .{ .key = "bar" }, .equals, .{ .string = "a" }});
         defer table.deinit(testing.allocator);
         
-        try testing.expectEqualStrings("a", table.table.get("foo").?.table.table.get("bar").?.string);
+        try testing.expectEqualStrings("a", table.getTable("foo").?.getString("bar").?);
     }
 
     {
@@ -787,8 +839,8 @@ test "dotted assignment" {
             .{ .key = "foo"}, .dot, .{ .key = "baz" }, .equals, .{ .string = "b" }, .newline,
         });
         defer table.deinit(testing.allocator);
-        try testing.expectEqualStrings("a", table.table.get("foo").?.table.table.get("bar").?.string);
-        try testing.expectEqualStrings("b", table.table.get("foo").?.table.table.get("baz").?.string);
+        try testing.expectEqualStrings("a", table.getTable("foo").?.getString("bar").?);
+        try testing.expectEqualStrings("b", table.getTable("foo").?.getString("baz").?);
     }
 
     {
@@ -797,8 +849,8 @@ test "dotted assignment" {
             .{ .key = "foo"}, .dot, .{ .string = "baz baz" }, .equals, .{ .string = "b" }, .newline,
         });
         defer table.deinit(testing.allocator);
-        try testing.expectEqualStrings("a", table.table.get("foo").?.table.table.get("bar").?.string);
-        try testing.expectEqualStrings("b", table.table.get("foo").?.table.table.get("baz baz").?.string);
+        try testing.expectEqualStrings("a", table.getTable("foo").?.getString("bar").?);
+        try testing.expectEqualStrings("b", table.getTable("foo").?.getString("baz baz").?);
     }
     // zig fmt: on
 }
@@ -819,8 +871,8 @@ test "table header" {
             .{ .key = "baz" }, .equals, .{ .string = "b" }, .newline,
         });
         defer table.deinit(testing.allocator);
-        try testing.expectEqualStrings("a", table.table.get("foo").?.table.table.get("bar").?.string);
-        try testing.expectEqualStrings("b", table.table.get("foo").?.table.table.get("baz").?.string);
+        try testing.expectEqualStrings("a", table.getTable("foo").?.getString("bar").?);
+        try testing.expectEqualStrings("b", table.getTable("foo").?.getString("baz").?);
     }
 
     {
@@ -833,8 +885,8 @@ test "table header" {
             .{ .key = "baz" }, .equals, .{ .string = "b" }, .newline,
         });
         defer table.deinit(testing.allocator);
-        try testing.expectEqualStrings("a", table.table.get("foo").?.table.table.get("bar").?.string);
-        try testing.expectEqualStrings("b", table.table.get("foo").?.table.table.get("baz").?.string);
+        try testing.expectEqualStrings("a", table.getTable("foo").?.getString("bar").?);
+        try testing.expectEqualStrings("b", table.getTable("foo").?.getString("baz").?);
     }
 
     {
@@ -846,10 +898,10 @@ test "table header" {
         defer table.deinit(testing.allocator);
         try testing.expectEqualStrings(
             "a", 
-            table.table.get("foo").?.table.table.get("bar").?.table.table.get("baz").?.string);
+            table.getTable("foo").?.getTable("bar").?.getString("baz").?);
         try testing.expectEqualStrings(
             "b",
-            table.table.get("foo").?.table.table.get("bar").?.table.table.get("bat").?.string);
+            table.getTable("foo").?.getTable("bar").?.getString("bat").?);
     }
 
     {
@@ -860,8 +912,8 @@ test "table header" {
             .{ .key = "b" }, .equals, .{ .integer = 2 }, .newline,
         });
         defer table.deinit(testing.allocator);
-        try testing.expectEqual(@as(i64, 1), table.table.get("foo").?.table.table.get("a").?.integer);
-        try testing.expectEqual(@as(i64, 2), table.table.get("bar").?.table.table.get("b").?.integer);
+        try testing.expectEqual(@as(i64, 1), table.getTable("foo").?.getInteger("a").?);
+        try testing.expectEqual(@as(i64, 2), table.getTable("bar").?.getInteger("b").?);
     }
     // zig fmt: on
 }
@@ -880,9 +932,7 @@ test "inline array" {
             .close_square_bracket });
         defer table.deinit(testing.allocator);
 
-        try testing.expectEqualSlices(Value, 
-            &.{ .{ .integer = 1 }, .{ .integer = 2 }},
-            table.table.get("foo").?.array.array.items);
+        try testing.expectEqualSlices(Value,  &.{ .{ .integer = 1 }, .{ .integer = 2 }}, table.getArray("foo").?.items());
     }
 
     {
@@ -892,9 +942,7 @@ test "inline array" {
             .close_square_bracket });
         defer table.deinit(testing.allocator);
 
-        try testing.expectEqualSlices(Value, 
-            &.{ .{ .integer = 1 }, .{ .integer = 2 }},
-            table.table.get("foo").?.array.array.items);
+        try testing.expectEqualSlices(Value,  &.{ .{ .integer = 1 }, .{ .integer = 2 }}, table.getArray("foo").?.items());
     }
     
     {
@@ -904,9 +952,9 @@ test "inline array" {
             .close_square_bracket });
         defer table.deinit(testing.allocator);
 
-        try testing.expectEqual(@as(usize, 2), table.table.get("foo").?.array.array.items.len);
-        try testing.expectEqual(Value{ .integer = 1}, table.table.get("foo").?.array.array.items[0]);
-        try testing.expectEqualStrings("bar", table.table.get("foo").?.array.array.items[1].string);
+        try testing.expectEqual(@as(usize, 2), table.getArray("foo").?.items().len);
+        try testing.expectEqual(Value{ .integer = 1}, table.getArray("foo").?.items()[0]);
+        try testing.expectEqualStrings("bar", table.getArray("foo").?.items()[1].string);
 
     }
 
@@ -918,11 +966,11 @@ test "inline array" {
             .close_square_bracket });
         defer table.deinit(testing.allocator);
 
-        try testing.expectEqual(@as(usize, 2), table.table.get("foo").?.array.array.items.len);
-        try testing.expectEqual(Value{ .integer = 1}, table.table.get("foo").?.array.array.items[0]);
+        try testing.expectEqual(@as(usize, 2), table.getArray("foo").?.items().len);
+        try testing.expectEqual(Value{ .integer = 1}, table.getArray("foo").?.items()[0]);
         try testing.expectEqualSlices(Value, 
             &.{ .{ .integer = 2 }, .{ .integer = 3 }},
-            table.table.get("foo").?.array.array.items[1].array.array.items);
+            table.getArray("foo").?.items()[1].array.items());
 
     }
     // zig fmt: on
@@ -946,10 +994,10 @@ test "arrays" {
         });
         defer table.deinit(testing.allocator);
         try testing.expectEqual(@as(usize, 1), table.table.count());
-        const arr =  table.table.get("foo").?.array.array;
-        try testing.expectEqual(@as(usize, 2), arr.items.len);
-        try testing.expectEqualStrings("a", arr.items[0].table.table.get("bar").?.string);
-        try testing.expectEqualStrings("b", arr.items[1].table.table.get("baz").?.string);
+        const arr =  table.getArray("foo").?;
+        try testing.expectEqual(@as(usize, 2), arr.items().len);
+        try testing.expectEqualStrings("a", arr.items()[0].table.getString("bar").?);
+        try testing.expectEqualStrings("b", arr.items()[1].table.getString("baz").?);
     }
 
     {
@@ -966,10 +1014,10 @@ test "arrays" {
         });
         defer table.deinit(testing.allocator);
         try testing.expectEqual(@as(usize, 1), table.table.count());
-        const arr =  table.table.get("foo").?.table.table.get("bar").?.array.array;
-        try testing.expectEqual(@as(usize, 2), arr.items.len);
-        try testing.expectEqual(@as(i64, 1), arr.items[0].table.table.get("a").?.integer);
-        try testing.expectEqual(@as(i64, 2), arr.items[1].table.table.get("b").?.integer);
+        const arr =  table.getTable("foo").?.getArray("bar").?;
+        try testing.expectEqual(@as(usize, 2), arr.items().len);
+        try testing.expectEqual(@as(i64, 1), arr.items()[0].table.getInteger("a").?);
+        try testing.expectEqual(@as(i64, 2), arr.items()[1].table.getInteger("b").?);
     }
     // zig fmt: on
 }
@@ -1013,11 +1061,11 @@ test "array of tables" {
         });
         defer table.deinit(testing.allocator);
         try testing.expectEqual(@as(usize, 1), table.table.count());
-        const arr = table.table.get("foo").?.array.array;
-        try testing.expectEqual(@as(usize, 1), arr.items.len);
-        try testing.expectEqualStrings("a", arr.items[0].table.table.get("bar").?.string);
-        const inner_table = arr.items[0].table.table.get("baz").?.table;
-        try testing.expectEqualStrings("b", inner_table.table.get("bat").?.string);
+        const arr = table.getArray("foo").?;
+        try testing.expectEqual(@as(usize, 1), arr.items().len);
+        try testing.expectEqualStrings("a", arr.items()[0].table.getString("bar").?);
+        const inner_table = arr.items()[0].table.getTable("baz").?;
+        try testing.expectEqualStrings("b", inner_table.getString("bat").?);
     }
     // zig fmt: on
 }
@@ -1044,8 +1092,8 @@ test "inline tables" {
             .close_curly_brace,
         });
         defer table.deinit(testing.allocator);
-        try testing.expectEqualStrings("a", table.table.get("foo").?.table.table.get("bar").?.string);
-        try testing.expectEqualStrings("b", table.table.get("foo").?.table.table.get("baz").?.string);
+        try testing.expectEqualStrings("a", table.getTable("foo").?.getString("bar").?);
+        try testing.expectEqualStrings("b", table.getTable("foo").?.getString("baz").?);
     }
 
     {
@@ -1057,7 +1105,7 @@ test "inline tables" {
         defer table.deinit(testing.allocator);
         try testing.expectEqualStrings(
             "a", 
-            table.table.get("foo").?.table.table.get("bar").?.table.table.get("baz").?.string);
+            table.getTable("foo").?.getTable("bar").?.getString("baz").?);
     }
     // zig fmt: on
 }
