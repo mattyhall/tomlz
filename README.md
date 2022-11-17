@@ -13,6 +13,9 @@ defer table.deinit(gpa);
 table.getInteger("foo").?; // 1
 ```
 
+Main tracks zig master, but we also have a 
+[0.10.0](https://github.com/mattyhall/tomlz/tree/zig-0.10.0) branch.
+
 ## Current status
 All types other than datetimes are supported. We pass 321/334 of the
 [toml tests](https://github.com/BurntSushi/toml-test) 11 of those are due to not
