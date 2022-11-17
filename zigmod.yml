@@ -1,0 +1,6 @@
+id: qbh3mfo5ck9p835t13fbskhxo2izt9saho18u4lx0dczafln
+name: tomlz
+main: src/main.zig
+license: MIT
+description: A toml parser for Zig
+dependencies:
