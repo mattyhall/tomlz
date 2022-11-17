@@ -24,6 +24,8 @@ The API is quite barebones at the moment but
 radar.
 
 ## Installation
+tomlz supports being a vendored dependency, zigmod and gyro.
+
 ### zigmod
 To use in a project where your dependencies are handled by
 [zigmod](https://github.com/nektro/zigmod) you can simply run:
@@ -38,6 +40,19 @@ and import using
 ```zig
 const tomlz = @import("tomlz");
 ```
+
+An [example is available](https://github.com/mattyhall/tomlz/tree/main/examples/zigmod).
+
+### gyro
+To use in a project where your dependencies are handled by
+[gyro](https://github.com/mattnite/gyro) you can simply run:
+
+```
+$ gyro add mattyhall/tomlz
+$ gyro fetch
+```
+
+An [example is available](https://github.com/mattyhall/tomlz/tree/main/examples/gyro).
 
 ### Submodule
 To add as a package a common approach is to clone this repository as a submodule
