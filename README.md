@@ -24,11 +24,22 @@ The API is quite barebones at the moment but
 radar.
 
 ## Installation
-Currently the only method available is to add the library as a package in
-`build.zig`, but we plan to add support for
-[gyro](https://github.com/mattyhall/tomlz/issues/5) and
-[zigmod](https://github.com/mattyhall/tomlz/issues/6) soon.
+### zigmod
+To use in a project where your dependencies are handled by
+[zigmod](https://github.com/nektro/zigmod) you can simply run:
 
+```
+$ zigmod aq add 1/mattyhall/tomlz
+$ zigmod fetch
+```
+
+and import using
+
+```zig
+const tomlz = @import("tomlz");
+```
+
+### Submodule
 To add as a package a common approach is to clone this repository as a submodule
 in your own, and then add it as a package in `build.zig` like so:
 
