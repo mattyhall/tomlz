@@ -14,9 +14,10 @@ table.getInteger("foo").?; // 1
 ```
 
 ## Current status
-All types other than datetimes are supported. We pass 320/334 of the
+All types other than datetimes are supported. We pass 321/334 of the
 [toml tests](https://github.com/BurntSushi/toml-test) 11 of those are due to not
-having datetime support and the others should be fairly minor issues.
+having datetime support and the other two are minor lexing issues (allowing
+whitespace between the square brackets of an array header).
 
 The API is quite barebones at the moment but
 [decoding to structs](https://github.com/mattyhall/tomlz/issues/7) is on our

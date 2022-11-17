@@ -27,10 +27,25 @@ pub const Lexer = union(enum) {
 pub const Table = struct {
     table: TableBase = .{},
     source: Source,
+    /// Whether or not we can assign to values inside of this table.
+    ///
+    /// NOTE: does not cover nesting. If we are table 'a' then you may be able to assign to 'a.b.c' even if we have
+    /// closed set to true.
+    closed: bool,
 
     const Source = enum { @"inline", header, top_level, assignment };
 
     const TableBase = std.StringHashMapUnmanaged(Value);
+
+    fn close(self: *Table) void {
+        self.closed = true;
+
+        var it = self.table.iterator();
+        while (it.next()) |entry| {
+            if (entry.value_ptr.* != .table) continue;
+            entry.value_ptr.table.close();
+        }
+    }
 
     pub fn contains(self: *const Table, key: []const u8) bool {
         return self.table.get(key) != null;
@@ -191,7 +206,7 @@ pub const Value = union(enum) {
                 break :b Value{ .array = .{ .array = new, .source = a.source } };
             },
             .table => |t| b: {
-                var new_table = Table{ .source = t.source };
+                var new_table = Table{ .source = t.source, .closed = t.closed };
                 var it = t.table.iterator();
                 while (it.next()) |entry| {
                     try new_table.insert(
@@ -204,18 +219,6 @@ pub const Value = union(enum) {
             },
             else => return self.*,
         };
-    }
-
-    fn emptyOtherThanTables(self: *Value) bool {
-        if (self.* != .table) return false;
-
-        var iter = self.table.table.iterator();
-        while (iter.next()) |entry| {
-            if (entry.value_ptr.* != .table) return false;
-            if (!entry.value_ptr.emptyOtherThanTables()) return false;
-        }
-
-        return true;
     }
 
     fn deinit(self: *Value, allocator: std.mem.Allocator) void {
@@ -244,7 +247,7 @@ pub const Parser = struct {
 
     pub fn init(allocator: std.mem.Allocator, lexer: Lexer) !Parser {
         var table = try allocator.create(Table);
-        table.* = .{ .source = .top_level };
+        table.* = .{ .source = .top_level, .closed = false };
         return .{ .allocator = allocator, .lexer = lexer, .top_level_table = table, .current_table = table };
     }
 
@@ -438,11 +441,15 @@ pub const Parser = struct {
     }!Value {
         const curr = self.current_table;
 
-        var tbl = Table{ .source = .@"inline" };
+        var tbl = Table{ .source = .@"inline", .closed = false };
         errdefer tbl.deinit(self.allocator);
 
         self.current_table = &tbl;
-        defer self.current_table = curr;
+        defer {
+            // Don't allow adding keys to an inline table
+            self.current_table.close();
+            self.current_table = curr;
+        }
 
         var first = true;
         while (true) {
@@ -479,6 +486,8 @@ pub const Parser = struct {
         }
     }
 
+    const AllowOpts = struct { exists: bool, closed: bool };
+
     /// createPath takes a key_path and ensures that it exists. If any key at any point in the path does not exist then
     /// it will be created. All but the final key are created as tables - e.g. "foo.bar.baz" will ensure "foo" is a
     /// table in self.current_table, "bar" is a table in that. "baz" will be a value with an undefined type which the
@@ -487,7 +496,7 @@ pub const Parser = struct {
         self: *Parser,
         key_path: []const []const u8,
         loc: lex.Loc,
-        allow_exists: bool,
+        allow_opts: AllowOpts,
         source: Table.Source,
     ) !struct { table: *Table, value: *Value, existed: bool = false } {
         std.debug.assert(key_path.len > 0);
@@ -496,8 +505,10 @@ pub const Parser = struct {
         for (key_path) |k, i| {
             if (i == key_path.len - 1) {
                 if (tbl.table.getPtr(k)) |val| {
-                    const empty_other_than_tables = val.emptyOtherThanTables();
-                    if (allow_exists or empty_other_than_tables) {
+                    if (val.* == .table and !val.table.closed)
+                        return .{ .table = tbl, .value = val, .existed = true };
+
+                    if (allow_opts.exists) {
                         if (val.* != .array)
                             return .{ .table = tbl, .value = val, .existed = true };
 
@@ -530,6 +541,10 @@ pub const Parser = struct {
                             self.diag = .{ .msg = "inline tables are immutable", .loc = loc };
                             return error.InlineTablesAndArraysAreImmutable;
                         }
+                        if (t.closed and !allow_opts.closed) {
+                            self.diag = .{ .msg = "table already exists", .loc = loc };
+                            return error.KeyAlreadyExists;
+                        }
                         tbl = t;
                     },
                     .array => |*a| {
@@ -548,7 +563,7 @@ pub const Parser = struct {
             } else {
                 var dup = try self.allocator.dupe(u8, k);
                 errdefer self.allocator.free(dup);
-                tbl = try tbl.getOrPutTable(self.allocator, dup, .{ .source = source });
+                tbl = try tbl.getOrPutTable(self.allocator, dup, .{ .source = source, .closed = false });
             }
         }
 
@@ -557,17 +572,26 @@ pub const Parser = struct {
 
     /// parseAssignment parses a key/value assignment to `key`, followed by either a newline or EOF
     fn parseAssignment(self: *Parser, loc: lex.Loc, key: []const u8) !void {
-        var val = b: {
-            var al = std.ArrayList([]const u8).init(self.allocator);
-            defer {
-                for (al.items) |s| self.allocator.free(s);
-                al.deinit();
-            }
+        var al = std.ArrayList([]const u8).init(self.allocator);
+        defer {
+            for (al.items) |s| self.allocator.free(s);
+            al.deinit();
+        }
 
-            const new_loc = try self.parseKey(key, loc, &al);
-            var res = try self.createPath(al.items, new_loc, false, .assignment);
-            break :b res.value;
-        };
+        const new_loc = try self.parseKey(key, loc, &al);
+        var res = try self.createPath(al.items, new_loc, AllowOpts{ .exists = false, .closed = false }, .assignment);
+
+        if (res.table.closed) {
+            self.diag = .{ .msg = "table already exists", .loc = loc };
+            return error.KeyAlreadyExists;
+        }
+
+        if (res.value.* == .table and res.existed) {
+            self.diag = .{ .msg = "key already exists", .loc = loc };
+            return error.KeyAlreadyExists;
+        }
+
+        var val = res.value;
 
         try self.expect(.equals, "=");
 
@@ -624,9 +648,9 @@ pub const Parser = struct {
         }
 
         const new_loc = try self.parseKey(key, tokloc.loc, &al);
-        var res = try self.createPath(al.items, new_loc, false, .header);
+        var res = try self.createPath(al.items, new_loc, AllowOpts{ .exists = false, .closed = true }, .header);
 
-        if (!res.existed) res.value.* = .{ .table = .{ .source = .header } };
+        if (!res.existed) res.value.* = .{ .table = .{ .source = .header, .closed = false } };
         self.current_table = &res.value.table;
 
         try self.expect(.close_square_bracket, "]");
@@ -651,7 +675,7 @@ pub const Parser = struct {
         if (al.items.len == 1) return .{ .table = self.current_table, .key = try self.allocator.dupe(u8, al.items[0]) };
 
         const all_but_last_key = al.items[0 .. al.items.len - 1];
-        var res = try self.createPath(all_but_last_key, new_loc, true, .header);
+        var res = try self.createPath(all_but_last_key, new_loc, AllowOpts{ .exists = true, .closed = true }, .header);
         if (res.existed and res.value.* != .table) {
             self.diag = .{
                 .msg = "key already exists and is not a table",
@@ -660,7 +684,7 @@ pub const Parser = struct {
             return error.NotTable;
         }
 
-        if (!res.existed) res.value.* = .{ .table = .{ .source = .header } };
+        if (!res.existed) res.value.* = .{ .table = .{ .source = .header, .closed = false } };
 
         return .{ .table = &res.value.table, .key = try self.allocator.dupe(u8, al.items[al.items.len - 1]) };
     }
@@ -692,7 +716,7 @@ pub const Parser = struct {
 
         defer if (existed) self.allocator.free(res.key);
 
-        try arr.array.append(self.allocator, .{ .table = .{ .source = .header } });
+        try arr.array.append(self.allocator, .{ .table = .{ .source = .header, .closed = false } });
         self.current_table = &arr.array.items[arr.array.items.len - 1].table;
 
         try self.expect(.close_square_bracket, "]");
@@ -708,7 +732,7 @@ pub const Parser = struct {
                     self.allocator.destroy(self.top_level_table);
 
                     self.top_level_table = try self.allocator.create(Table);
-                    self.top_level_table.* = .{ .source = .top_level };
+                    self.top_level_table.* = .{ .source = .top_level, .closed = false };
                     self.current_table = self.top_level_table;
                     return table;
                 },
@@ -719,6 +743,7 @@ pub const Parser = struct {
                 .key => |k| try self.parseAssignmentEatNewline(tokloc.loc, k),
                 .string => |s| try self.parseAssignmentEatNewline(tokloc.loc, s),
                 .open_square_bracket => {
+                    if (self.current_table != self.top_level_table) self.current_table.close();
                     self.current_table = self.top_level_table;
                     const next = try self.peek(true);
                     switch (next.tok) {
@@ -760,7 +785,7 @@ const KV = struct { k: []const u8, v: Value };
 
 /// kvsToTable takes a slice of KVs (i.e. assignments) and returns the table they would make
 fn kvsToTable(kvs: []const KV) !Table {
-    var table = Table{ .source = .assignment };
+    var table = Table{ .source = .assignment, .closed = false };
     for (kvs) |entry| {
         const v = try entry.v.dupe(testing.allocator);
         try table.insert(testing.allocator, try testing.allocator.dupe(u8, entry.k), v);
