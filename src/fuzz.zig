@@ -21,7 +21,7 @@ pub fn main() !void {
     defer p.deinit();
 
     var table = p.parse() catch |err| {
-        std.debug.print("error parsing {}\n", .{ err });
+        std.debug.print("error parsing {}\n", .{err});
         std.debug.print("{?}\n", .{p.diag});
         return;
     };
