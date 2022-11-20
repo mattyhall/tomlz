@@ -215,8 +215,8 @@ pub const Lexer = struct {
                         if (i == 2) break;
                     }
 
-                    _ = self.pop() catch unreachable;
-                    _ = self.pop() catch unreachable;
+                    _ = try self.pop();
+                    _ = try self.pop();
 
                     return TokLoc{ .loc = loc, .tok = .{ .string = al.items } };
                 },
