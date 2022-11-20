@@ -528,7 +528,7 @@ pub const Parser = struct {
                     var dup = try self.allocator.dupe(u8, k);
                     errdefer self.allocator.free(dup);
 
-                    try tbl.table.put(self.allocator, dup, undefined);
+                    try tbl.table.put(self.allocator, dup, .{ .integer = 0xaa });
                     break :b tbl.table.getPtr(k) orelse unreachable;
                 };
                 return .{ .table = tbl, .value = val };
