@@ -163,7 +163,6 @@ fn expectParseEqualToJson(src: []const u8, json: []const u8) !void {
     try testing.expectEqualStrings(json, actual_al.items);
 }
 
-
 fn testFile(dir: *const std.fs.Dir, basename: []const u8) !parser.Table {
     var f = try dir.openFile(basename, .{});
     defer f.close();
@@ -261,6 +260,37 @@ test "valid" {
     }
 
     if (fail) return error.ValidDidNotPass;
+}
+
+test "decode simple" {
+    const S = struct {
+        b: bool,
+        i1: i32,
+        i2: u8,
+        f1: f32,
+        f2: f64,
+    };
+
+    var s = try parser.decode(S, testing.allocator,
+        \\b = false
+        \\i1 = 147
+        \\i2 = 14
+        \\f1 = 14.7
+        \\f2 = 14.7
+    );
+
+    try testing.expectEqual(S{ .b = false, .i1 = 147, .i2 = 14, .f1 = 14.7, .f2 = 14.7 }, s);
+}
+
+test "decode array of values" {
+    const S = struct {
+        vals: []const i64,
+    };
+
+    var s = try parser.decode(S, testing.allocator, "vals = [1, 2, 3, 4, 5]");
+    defer testing.allocator.free(s.vals);
+
+    try testing.expectEqualSlices(i64, &.{ 1, 2, 3, 4, 5 }, s.vals);
 }
 
 test "snooker" {
