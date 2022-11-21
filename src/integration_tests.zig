@@ -282,7 +282,7 @@ test "decode simple" {
     try testing.expectEqual(S{ .b = false, .i1 = 147, .i2 = 14, .f1 = 14.7, .f2 = 14.7 }, s);
 }
 
-test "decode array of values" {
+test "decode array of ints" {
     const S = struct {
         vals: []const i64,
     };
@@ -291,6 +291,25 @@ test "decode array of values" {
     defer testing.allocator.free(s.vals);
 
     try testing.expectEqualSlices(i64, &.{ 1, 2, 3, 4, 5 }, s.vals);
+}
+
+test "decode array of strings" {
+    const S = struct {
+        vals: []const []const u8,
+    };
+
+    var s = try parser.decode(S, testing.allocator,
+        \\vals = ["hello", ", ", "world"]
+    );
+    defer {
+        for (s.vals) |str| testing.allocator.free(str);
+        testing.allocator.free(s.vals);
+    }
+
+    try testing.expectEqual(@as(usize, 3), s.vals.len);
+    try testing.expectEqualStrings("hello", s.vals[0]);
+    try testing.expectEqualStrings(", ", s.vals[1]);
+    try testing.expectEqualStrings("world", s.vals[2]);
 }
 
 test "snooker" {

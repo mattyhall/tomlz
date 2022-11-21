@@ -261,6 +261,15 @@ fn decodeValue(gpa: std.mem.Allocator, comptime ti: std.builtin.Type, v: Value) 
             comptime if (opts_unwrapped_ti != .Bool) return error.MismatchedType;
             return b;
         },
+        .string => |s| {
+            comptime if (ti != .Pointer or ti.Pointer.child != u8 or
+                (ti.Pointer.size != .Slice and ti.Pointer.Size != .Many))
+            {
+                return error.MismatchedType;
+            };
+
+            return try gpa.dupe(u8, s);
+        },
         .array => |a| {
             comptime if (ti != .Pointer or (ti.Pointer.size != .Slice and ti.Pointer.size != .Many))
                 return error.MismatchedType;
