@@ -312,6 +312,24 @@ test "decode array of strings" {
     try testing.expectEqualStrings("world", s.vals[2]);
 }
 
+test "decode array of tables" {
+    const B = struct { a: i64 };
+    const F = struct { bar: []const B };
+    const S = struct { foo: F };
+
+    var s = try parser.decode(S, testing.allocator,
+        \\[[foo.bar]]
+        \\a = 147
+        \\[[foo.bar]]
+        \\a = 1
+    );
+    defer {
+        testing.allocator.free(s.foo.bar);
+    }
+
+    try testing.expectEqualSlices(B, &.{ .{ .a = 147 }, .{ .a = 1 } }, s.foo.bar);
+}
+
 test "snooker" {
     try expectParseEqualToJson(
         \\name = "snooker"
@@ -343,6 +361,67 @@ test "snooker" {
         \\    }
         \\}
     );
+}
+
+test "decode snooker" {
+    const TripleCrowns = struct { worlds: i64, masters: i64, uks: i64 };
+
+    const Player = struct {
+        name: []const u8,
+        age: i64,
+        hobbies: []const []const u8,
+        triplecrowns: TripleCrowns,
+
+        const Self = @This();
+
+        pub fn deinit(self: *Self, gpa: std.mem.Allocator) void {
+            gpa.free(self.name);
+
+            for (self.hobbies) |hobby| {
+                gpa.free(hobby);
+            }
+            gpa.free(self.hobbies);
+        }
+    };
+
+    const Game = struct {
+        name: []const u8,
+        goat: Player,
+
+        const Self = @This();
+
+        pub fn deinit(self: *Self, gpa: std.mem.Allocator) void {
+            gpa.free(self.name);
+            self.goat.deinit(gpa);
+        }
+    };
+
+    var s = try parser.decode(Game, testing.allocator,
+        \\name = "snooker"
+        \\
+        \\[goat]
+        \\name = "Ronnie o' Sullivan"
+        \\age = 46 # as of Nov 2022
+        \\hobbies = ["running", "hustling at pool"]
+        \\
+        \\[goat.triplecrowns]
+        \\worlds = 7
+        \\masters = 7
+        \\uks = 7
+    );
+    defer s.deinit(testing.allocator);
+
+    try testing.expectEqualStrings("snooker", s.name);
+
+    try testing.expectEqualStrings("Ronnie o' Sullivan", s.goat.name);
+    try testing.expectEqual(@as(i64, 46), s.goat.age);
+    try testing.expectEqual(@as(usize, 2), s.goat.hobbies.len);
+    try testing.expectEqualStrings("running", s.goat.hobbies[0]);
+    try testing.expectEqualStrings("hustling at pool", s.goat.hobbies[1]);
+
+    try testing.expectEqual(@as(i64, 7), s.goat.triplecrowns.worlds);
+    try testing.expectEqual(@as(i64, 7), s.goat.triplecrowns.masters);
+    try testing.expectEqual(@as(i64, 7), s.goat.triplecrowns.uks);
 }
 
 test "helix config" {
