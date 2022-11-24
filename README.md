@@ -11,6 +11,14 @@ var table = try parser.parse(gpa,
 defer table.deinit(gpa);
 
 table.getInteger("foo").?; // 1
+
+
+// --- or ---
+const S = struct { foo: i64, bar: i64 };
+const s = try parser.decode(S, gpa,
+  \\foo = 1
+  \\bar = 2
+);
 ```
 
 ## Current status
@@ -19,9 +27,9 @@ All types other than datetimes are supported. We pass 321/334 of the
 having datetime support and the other two are minor lexing issues (allowing
 whitespace between the square brackets of an array header).
 
-The API is quite barebones at the moment but
-[decoding to structs](https://github.com/mattyhall/tomlz/issues/7) is on our
-radar.
+We allow both parsing into a special TOML type, a `Table`, but also support
+decoding into a struct directly - including types that must be allocated like
+arrays and strings.
 
 ## Installation
 tomlz supports being a vendored dependency, zigmod and gyro.
@@ -67,6 +75,7 @@ in your own, and then add it as a package in `build.zig` like so:
 ```
 
 ## Usage
+### Table
 We currently provide a single entry point for parsing which returns a toml
 `Table` type. This type has helper methods for getting values out:
 
@@ -92,6 +101,57 @@ table.getTable("table");
 
 A simple example is
 [provided](https://github.com/mattyhall/tomlz/tree/main/examples/simple/).
+
+### Decode
+```zig
+var gpa = std.heap.page_allocator;
+const TripleCrowns = struct { worlds: i64, masters: i64, uks: i64 };
+
+const Player = struct {
+    name: []const u8,
+    age: i64,
+    hobbies: []const []const u8,
+    triplecrowns: TripleCrowns,
+
+    const Self = @This();
+
+    pub fn deinit(self: *Self, gpa: std.mem.Allocator) void {
+        gpa.free(self.name);
+
+        for (self.hobbies) |hobby| {
+            gpa.free(hobby);
+        }
+        gpa.free(self.hobbies);
+    }
+};
+
+const Game = struct {
+    name: []const u8,
+    goat: Player,
+
+    const Self = @This();
+
+    pub fn deinit(self: *Self, gpa: std.mem.Allocator) void {
+        gpa.free(self.name);
+        self.goat.deinit(gpa);
+    }
+};
+
+var s = try parser.decode(Game, gpa,
+    \\name = "snooker"
+    \\
+    \\[goat]
+    \\name = "Ronnie o' Sullivan"
+    \\age = 46 # as of Nov 2022
+    \\hobbies = ["running", "hustling at pool"]
+    \\
+    \\[goat.triplecrowns]
+    \\worlds = 7
+    \\masters = 7
+    \\uks = 7
+);
+defer s.deinit(gpa);
+``
 
 ## Goals and non-goals
 Goals and non-goals are subject to change based on how the project is used and
