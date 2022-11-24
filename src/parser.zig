@@ -298,13 +298,14 @@ fn decodeTable(comptime T: anytype, gpa: std.mem.Allocator, table: Table) !T {
     inline for (ti.Struct.fields) |f| {
         const f_ti = @typeInfo(f.field_type);
         if (!table.contains(f.name)) {
-            if (f_ti == .Optional) continue;
-
-            return error.MissingField;
+            if (f_ti != .Optional)
+                return error.MissingField
+            else
+                @field(strct, f.name) = null;
+        } else {
+            var v = table.table.get(f.name).?;
+            @field(strct, f.name) = try decodeValue(f.field_type, gpa, v);
         }
-
-        var v = table.table.get(f.name).?;
-        @field(strct, f.name) = try decodeValue(f.field_type, gpa, v);
     }
 
     return strct;

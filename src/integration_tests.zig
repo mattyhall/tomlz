@@ -282,6 +282,14 @@ test "decode simple" {
     try testing.expectEqual(S{ .b = false, .i1 = 147, .i2 = 14, .f1 = 14.7, .f2 = 14.7 }, s);
 }
 
+test "decode optional" {
+    const S = struct { a: i64, b: ?bool };
+
+    var s = try parser.decode(S, testing.allocator, "a = 147");
+
+    try testing.expectEqual(S{ .a = 147, .b = null }, s);
+}
+
 test "decode array of ints" {
     const S = struct {
         vals: []const i64,
