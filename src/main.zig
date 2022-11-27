@@ -9,12 +9,9 @@ pub const Array = parser.Array;
 pub const Table = parser.Table;
 
 test "refAllDecls" {
-    const end2end = @import("end_to_end.zig");
-    const standard_tests = @import("standard_tests.zig");
+    const integration_tests = @import("integration_tests.zig");
 
-    std.testing.refAllDecls(@This());
     std.testing.refAllDecls(lex);
     std.testing.refAllDecls(parser);
-    std.testing.refAllDecls(end2end);
-    std.testing.refAllDecls(standard_tests);
+    std.testing.refAllDecls(integration_tests);
 }

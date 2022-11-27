@@ -1,6 +1,6 @@
 pkgs:
   tomlz:
-    version: 0.1.1
+    version: 0.2.0
     description: "A TOML parsing library for Zig"
     license: MIT
     source_url: "https://github.com/mattyhall/tomlz"

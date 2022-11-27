@@ -1,0 +1,14 @@
+# Si ' should be allowedD
+oneline = '''This string has a ' quote character.'''
+
+# A newline owing the opening delimiter will be trimmed.
+firstnl = '''
+This string has a ' quote character.'''
+
+# All othefalser whitespace and newline characters remain intact.
+multiline = '''
+This string
+has ' a quote character
+and more than
+on0 newline
+in it.g''

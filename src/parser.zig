@@ -236,6 +236,91 @@ pub const Value = union(enum) {
     }
 };
 
+fn unwrapOptionals(comptime T: anytype) std.builtin.Type {
+    var ti = @typeInfo(T);
+    inline while (true) {
+        switch (ti) {
+            .Optional => |o| ti = @typeInfo(o.child),
+            else => return ti,
+        }
+    }
+}
+
+fn decodeValue(comptime T: type, gpa: std.mem.Allocator, v: Value) !T {
+    const ti = @typeInfo(T);
+    const opts_unwrapped_ti = unwrapOptionals(T);
+    switch (v) {
+        .integer => |i| {
+            comptime if (opts_unwrapped_ti != .Int) return error.MismatchedType;
+            return @intCast(@Type(opts_unwrapped_ti), i);
+        },
+        .float => |fl| {
+            comptime if (opts_unwrapped_ti != .Float) return error.MismatchedType;
+            return @floatCast(@Type(opts_unwrapped_ti), fl);
+        },
+        .boolean => |b| {
+            comptime if (opts_unwrapped_ti != .Bool) return error.MismatchedType;
+            return b;
+        },
+        .string => |s| {
+            comptime if (ti != .Pointer or ti.Pointer.child != u8 or
+                (ti.Pointer.size != .Slice and ti.Pointer.Size != .Many))
+            {
+                return error.MismatchedType;
+            };
+
+            return try gpa.dupe(u8, s);
+        },
+        .array => |a| {
+            comptime if (ti != .Pointer or (ti.Pointer.size != .Slice and ti.Pointer.size != .Many))
+                return error.MismatchedType;
+
+            var al = try std.ArrayList(ti.Pointer.child).initCapacity(gpa, a.items().len);
+            errdefer al.deinit();
+            for (a.items()) |array_val| {
+                al.appendAssumeCapacity(try decodeValue(ti.Pointer.child, gpa, array_val));
+            }
+
+            return al.toOwnedSlice();
+        },
+        .table => |t| {
+            return try decodeTable(T, gpa, t);
+        },
+    }
+}
+
+fn decodeTable(comptime T: anytype, gpa: std.mem.Allocator, table: Table) !T {
+    const ti = @typeInfo(T);
+    if (ti != .Struct) return error.MismatchedTypes;
+
+    var strct: T = undefined;
+
+    inline for (ti.Struct.fields) |f| {
+        const f_ti = @typeInfo(f.field_type);
+        if (!table.contains(f.name)) {
+            if (f_ti != .Optional)
+                return error.MissingField
+            else
+                @field(strct, f.name) = null;
+        } else {
+            var v = table.table.get(f.name).?;
+            @field(strct, f.name) = try decodeValue(f.field_type, gpa, v);
+        }
+    }
+
+    return strct;
+}
+
+pub fn decode(comptime T: anytype, gpa: std.mem.Allocator, src: []const u8) !T {
+    const ti = @typeInfo(T);
+    if (ti != .Struct) @compileError("argument T of decode must be a struct");
+
+    var tbl = try parse(gpa, src);
+    defer tbl.deinit(gpa);
+
+    return try decodeTable(T, gpa, tbl);
+}
+
 /// Parser takes a Lexer and parses the tokens into a table.
 pub const Parser = struct {
     allocator: std.mem.Allocator,
@@ -528,7 +613,7 @@ pub const Parser = struct {
                     var dup = try self.allocator.dupe(u8, k);
                     errdefer self.allocator.free(dup);
 
-                    try tbl.table.put(self.allocator, dup, undefined);
+                    try tbl.table.put(self.allocator, dup, .{ .integer = 0xaa });
                     break :b tbl.table.getPtr(k) orelse unreachable;
                 };
                 return .{ .table = tbl, .value = val };
