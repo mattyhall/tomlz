@@ -151,7 +151,7 @@ var s = try parser.decode(Game, gpa,
     \\uks = 7
 );
 defer s.deinit(gpa);
-``
+```
 
 ## Goals and non-goals
 Goals and non-goals are subject to change based on how the project is used and
