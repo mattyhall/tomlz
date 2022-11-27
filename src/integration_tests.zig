@@ -227,6 +227,8 @@ fn testValid(dir: *const std.fs.Dir, path: []const u8, basename: []const u8) !bo
     return false;
 }
 
+// standard tests
+
 test "invalid" {
     var dir = try std.fs.cwd().makeOpenPathIterable("tests/invalid", .{});
     defer dir.close();
@@ -261,6 +263,34 @@ test "valid" {
 
     if (fail) return error.ValidDidNotPass;
 }
+
+// fuzz error case tests
+
+test "fuzz" {
+    var dir = try std.fs.cwd().makeOpenPathIterable("tests/fuzzing", .{});
+    defer dir.close();
+
+    var walker = try dir.walk(testing.allocator);
+    defer walker.deinit();
+    while (try walker.next()) |entry| {
+        if (entry.kind != .File) continue;
+
+        var full_path = try entry.dir.realpathAlloc(testing.allocator, entry.basename);
+        defer testing.allocator.free(full_path);
+
+        var f = try entry.dir.openFile(full_path, .{});
+        defer f.close();
+
+        var contents = try f.reader().readAllAlloc(testing.allocator, 5 * 1024 * 1024);
+        defer testing.allocator.free(contents);
+
+        // We just want to make sure we don't crash when parsing these
+        var tbl = parser.parse(testing.allocator, contents) catch continue;
+        tbl.deinit(testing.allocator);
+    }
+}
+
+// decode tests
 
 test "decode simple" {
     const S = struct {
@@ -337,6 +367,8 @@ test "decode array of tables" {
 
     try testing.expectEqualSlices(B, &.{ .{ .a = 147 }, .{ .a = 1 } }, s.foo.bar);
 }
+
+// toml2json tests
 
 test "snooker" {
     try expectParseEqualToJson(
