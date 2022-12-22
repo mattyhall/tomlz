@@ -90,9 +90,10 @@ pub const Lexer = struct {
 
         const c = self.source[self.index];
         self.index += 1;
+        self.loc.col += 1;
         if (c == '\n') {
             self.loc.line += 1;
-            self.loc.col = 0;
+            self.loc.col = 1;
         }
 
         return c;
@@ -581,7 +582,8 @@ pub const Lexer = struct {
         return TokLoc{ .loc = loc, .tok = tok };
     }
 
-    fn consume(self: *Lexer, tok: Tok, loc: Loc) TokLoc {
+    fn consume(self: *Lexer, tok: Tok) TokLoc {
+        const loc = self.loc;
         _ = self.pop() catch unreachable;
         return .{ .tok = tok, .loc = loc };
     }
@@ -610,18 +612,18 @@ pub const Lexer = struct {
         const loc = self.loc;
 
         switch (c) {
-            '=' => return self.consume(.equals, loc),
-            '.' => return self.consume(.dot, loc),
-            ',' => return self.consume(.comma, loc),
-            '[' => return self.consume(.open_square_bracket, loc),
-            ']' => return self.consume(.close_square_bracket, loc),
-            '{' => return self.consume(.open_curly_brace, loc),
-            '}' => return self.consume(.close_curly_brace, loc),
-            '\n' => return self.consume(.newline, loc),
+            '=' => return self.consume(.equals),
+            '.' => return self.consume(.dot),
+            ',' => return self.consume(.comma),
+            '[' => return self.consume(.open_square_bracket),
+            ']' => return self.consume(.close_square_bracket),
+            '{' => return self.consume(.open_curly_brace),
+            '}' => return self.consume(.close_curly_brace),
+            '\n' => return self.consume(.newline),
             '\r' => {
                 _ = self.pop() catch unreachable;
 
-                if (try self.peek() == '\n') return self.consume(.newline, loc);
+                if (try self.peek() == '\n') return self.consume(.newline);
 
                 self.diag = .{ .msg = "expect a \\n after a \\r", .loc = loc };
                 return error.UnexpectedChar;
