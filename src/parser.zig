@@ -296,7 +296,7 @@ fn decodeTable(comptime T: anytype, gpa: std.mem.Allocator, table: Table) !T {
     var strct: T = undefined;
 
     inline for (ti.Struct.fields) |f| {
-        const f_ti = @typeInfo(f.field_type);
+        const f_ti = @typeInfo(f.type);
         if (!table.contains(f.name)) {
             if (f_ti != .Optional)
                 return error.MissingField
@@ -304,7 +304,7 @@ fn decodeTable(comptime T: anytype, gpa: std.mem.Allocator, table: Table) !T {
                 @field(strct, f.name) = null;
         } else {
             var v = table.table.get(f.name).?;
-            @field(strct, f.name) = try decodeValue(f.field_type, gpa, v);
+            @field(strct, f.name) = try decodeValue(f.type, gpa, v);
         }
     }
 

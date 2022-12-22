@@ -13,7 +13,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     zls = {
-      url = "github:zigtools/zls";
+      url = "github:erikarvstedt/zls/fix-nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
@@ -37,7 +37,7 @@
           rec {
             devShell = pkgs.mkShell {
               buildInputs = (with pkgs; [
-                zigpkgs.master-2022-11-04
+                zigpkgs.master-2022-12-21
                 zlspkgs.default
                 bashInteractive
                 gdb

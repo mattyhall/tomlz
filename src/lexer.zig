@@ -420,7 +420,7 @@ pub const Lexer = struct {
                 return;
             }
 
-            if (c == '\n' or !std.ascii.isSpace(c)) return;
+            if (c == '\n' or !std.ascii.isWhitespace(c)) return;
 
             _ = self.pop() catch unreachable;
         }
