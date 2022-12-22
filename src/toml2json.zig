@@ -27,8 +27,8 @@ pub fn main() !void {
     };
     defer table.deinit(gpa);
 
-    const e2e = @import("end_to_end.zig");
-    var json = try e2e.tableToJson(gpa, &table);
+    const integration = @import("integration_tests.zig");
+    var json = try integration.tableToJson(gpa, &table);
 
     var al = std.ArrayList(u8).init(gpa);
     defer al.deinit();
