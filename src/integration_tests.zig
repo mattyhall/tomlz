@@ -2,10 +2,7 @@ const std = @import("std");
 const parser = @import("parser.zig");
 const testing = std.testing;
 
-const failing_invalid_tests = [_][]const u8{
-    "table/rrbrace.toml",
-    "table/llbrace.toml",
-};
+const failing_invalid_tests = [_][]const u8{};
 
 const failing_valid_tests = [_][]const u8{
     "comment/everywhere.toml",

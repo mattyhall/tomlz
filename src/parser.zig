@@ -2,6 +2,33 @@ const std = @import("std");
 const lex = @import("lexer.zig");
 const testing = std.testing;
 
+fn locToIndex(src: []const u8, loc: lex.Loc) usize {
+    var line: usize = 1;
+    var col: usize = 1;
+    var i: usize = 0;
+
+    while (i < src.len) : (i += 1) {
+        const c = src[i];
+        if (c == '\r' and i + 1 < src.len and src[i + 1] == '\n') {
+            col = 1;
+            line += 1;
+            i += 1;
+            continue;
+        }
+        if (c == '\n') {
+            col = 1;
+            line += 1;
+            continue;
+        }
+
+        if (line == loc.line and col == loc.col) break;
+
+        col += 1;
+    }
+
+    return i;
+}
+
 /// Lexer is a wrapper enum so we can do static dispatch on real/fake lexers for testing purposes
 pub const Lexer = union(enum) {
     real: lex.Lexer,
@@ -11,6 +38,13 @@ pub const Lexer = union(enum) {
         return switch (self.*) {
             .real => |*r| r.next(force_key),
             .fake => |*f| f.next(),
+        };
+    }
+
+    fn source(self: *const Lexer) []const u8 {
+        return switch (self.*) {
+            .real => |*r| r.source,
+            .fake => "<empty source>",
         };
     }
 
@@ -774,12 +808,29 @@ pub const Parser = struct {
         return .{ .table = &res.value.table, .key = try self.allocator.dupe(u8, al.items[al.items.len - 1]) };
     }
 
+    /// ensureNoWhitespace returns an error if the current token was preceeded by some whitespace.
+    fn ensureNoWhitespace(self: *Parser, loc: lex.Loc) !void {
+        const src = self.lexer.source();
+        const index = locToIndex(src, loc);
+        if (index == 0) return;
+
+        if (std.ascii.isWhitespace(src[index - 1]) and src[index - 1] != '\n') {
+            self.diag = .{
+                .msg = "unexpected whitespace",
+                .loc = loc,
+            };
+            return error.UnexpectedChar;
+        }
+    }
+
     /// parseArrayHeader parses "[[<key>]]\n" which specifies the next assignments should be in a table in the array
-    /// <key>
+    /// <key>. loc is the location of the second '['.
     ///
     /// NOTE: Assumes "[[" has already been parsed
-    fn parseArrayHeader(self: *Parser) !void {
+    fn parseArrayHeader(self: *Parser, loc: lex.Loc) !void {
         std.debug.assert(self.current_table == self.top_level_table);
+
+        try self.ensureNoWhitespace(loc);
 
         const tokloc = try self.pop(true);
         const key = switch (tokloc.tok) {
@@ -805,6 +856,12 @@ pub const Parser = struct {
         self.current_table = &arr.array.items[arr.array.items.len - 1].table;
 
         try self.expect(.close_square_bracket, "]");
+
+        const closing_bracket = try self.peek(false);
+        if (closing_bracket.tok == .close_square_bracket) {
+            try self.ensureNoWhitespace(closing_bracket.loc);
+        }
+
         try self.expect(.close_square_bracket, "]");
         try self.expect(.newline, "\n");
     }
@@ -834,7 +891,7 @@ pub const Parser = struct {
                     switch (next.tok) {
                         .open_square_bracket => {
                             _ = self.pop(true) catch unreachable;
-                            try self.parseArrayHeader();
+                            try self.parseArrayHeader(next.loc);
                         },
                         else => try self.parseTableHeader(),
                     }
