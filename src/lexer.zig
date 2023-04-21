@@ -686,7 +686,7 @@ fn readAllTokens(src: []const u8) ![]const Tok {
         try al.append(testing.allocator, try tok_loc.tok.dupe(testing.allocator));
     }
 
-    return al.items;
+    return al.toOwnedSlice(testing.allocator);
 }
 
 fn testTokens(src: []const u8, expected: []const Tok) !void {
@@ -695,7 +695,7 @@ fn testTokens(src: []const u8, expected: []const Tok) !void {
         for (toks) |tok| {
             tok.deinit(testing.allocator);
         }
-        defer testing.allocator.free(toks);
+        testing.allocator.free(toks);
     }
 
     try testing.expectEqual(expected.len, toks.len);

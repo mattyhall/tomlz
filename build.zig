@@ -1,24 +1,31 @@
 const std = @import("std");
 
 pub fn build(b: *std.build.Builder) !void {
-    // Standard release options allow the person running `zig build` to select
-    // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
-    const mode = b.standardReleaseOptions();
+    const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
 
-    const lib = b.addStaticLibrary("tomlz", "src/main.zig");
-    lib.setBuildMode(mode);
-    lib.install();
+    const lib = b.addStaticLibrary(.{
+        .name = "tomlz",
+        .root_source_file = .{ .path = "src/main.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+    b.installArtifact(lib);
 
-    const main_tests = b.addTest("src/main.zig");
-    main_tests.setBuildMode(mode);
+    const main_tests = b.addTest(.{
+        .root_source_file = .{ .path = "src/main.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const run_main_tests = b.addRunArtifact(main_tests);
 
     const test_step = b.step("test", "Run library tests");
-    test_step.dependOn(&main_tests.step);
+    test_step.dependOn(&run_main_tests.step);
 
-    const fuzz_exe = b.addExecutable("fuzz", "src/fuzz.zig");
-    fuzz_exe.setBuildMode(mode);
+    const fuzz_exe = b.addExecutable(.{ .name = "fuzz", .root_source_file = .{ .path = "src/fuzz.zig" } });
     fuzz_exe.linkLibC();
-    fuzz_exe.install();
+    b.installArtifact(fuzz_exe);
     const fuzz_compile_run = b.step("fuzz", "Build executable for fuzz testing afl-fuzz");
-    fuzz_compile_run.dependOn(&fuzz_exe.install_step.?.step);
+    fuzz_compile_run.dependOn(&fuzz_exe.step);
 }

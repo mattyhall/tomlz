@@ -82,7 +82,7 @@ pub fn jsonEquality(gpa: std.mem.Allocator, actual: *const std.json.Value, expec
             var arr_expected = expected.Array.items;
             if (arr_actual.len != arr_expected.len) return false;
 
-            for (arr_actual) |value_a, i| {
+            for (arr_actual, 0..) |value_a, i| {
                 const value_e = arr_expected[i];
                 if (dbg) std.debug.print("index: {}\n", .{i});
                 if (!try jsonEquality(gpa, &value_a, &value_e)) return false;

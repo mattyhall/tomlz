@@ -285,28 +285,28 @@ fn decodeValue(comptime T: type, gpa: std.mem.Allocator, v: Value) !T {
     const opts_unwrapped_ti = unwrapOptionals(T);
     switch (v) {
         .integer => |i| {
-            comptime if (opts_unwrapped_ti != .Int) return error.MismatchedType;
+            if (opts_unwrapped_ti != .Int) return error.MismatchedType;
             return @intCast(@Type(opts_unwrapped_ti), i);
         },
         .float => |fl| {
-            comptime if (opts_unwrapped_ti != .Float) return error.MismatchedType;
+            if (opts_unwrapped_ti != .Float) return error.MismatchedType;
             return @floatCast(@Type(opts_unwrapped_ti), fl);
         },
         .boolean => |b| {
-            comptime if (opts_unwrapped_ti != .Bool) return error.MismatchedType;
+            if (opts_unwrapped_ti != .Bool) return error.MismatchedType;
             return b;
         },
         .string => |s| {
-            comptime if (ti != .Pointer or ti.Pointer.child != u8 or
+            if (ti != .Pointer or ti.Pointer.child != u8 or
                 (ti.Pointer.size != .Slice and ti.Pointer.Size != .Many))
             {
                 return error.MismatchedType;
-            };
+            }
 
             return try gpa.dupe(u8, s);
         },
         .array => |a| {
-            comptime if (ti != .Pointer or (ti.Pointer.size != .Slice and ti.Pointer.size != .Many))
+            if (ti != .Pointer or (ti.Pointer.size != .Slice and ti.Pointer.size != .Many))
                 return error.MismatchedType;
 
             var al = try std.ArrayList(ti.Pointer.child).initCapacity(gpa, a.items().len);
@@ -621,7 +621,7 @@ pub const Parser = struct {
         std.debug.assert(key_path.len > 0);
 
         var tbl = self.current_table;
-        for (key_path) |k, i| {
+        for (key_path, 0..) |k, i| {
             if (i == key_path.len - 1) {
                 if (tbl.table.getPtr(k)) |val| {
                     if (val.* == .table and !val.table.closed)
@@ -944,7 +944,7 @@ fn toksToLocToks(toks: []const lex.Tok) ![]lex.TokLoc {
         try al.append(testing.allocator, .{ .tok = tok, .loc = loc });
     }
 
-    return al.items;
+    return al.toOwnedSlice(testing.allocator);
 }
 
 /// testParse takes the given toks and parses them into a table
