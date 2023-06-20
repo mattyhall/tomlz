@@ -9,7 +9,7 @@ export fn cmain() void {
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer std.debug.assert(!gpa.deinit());
+    defer std.debug.assert(gpa.deinit() == .ok);
     var allocator = gpa.allocator();
 
     const stdin = std.io.getStdIn();
