@@ -64,14 +64,6 @@ pub fn jsonEquality(gpa: std.mem.Allocator, actual: *const std.json.Value, expec
                 return std.math.isNan(actual.float);
         }
 
-        // var p = std.json.Parser.init(gpa, false);
-        // defer p.deinit();
-
-        // var tree = p.parse(s.string) catch {
-        //     if (dbg) std.debug.print("could not parse '{s}'", .{s.string});
-        //     return false;
-        // };
-        // defer tree.deinit();
         var parsed = std.json.parseFromSlice(std.json.Value, gpa, s.string, .{}) catch {
             if (dbg) std.debug.print("could not parse '{s}'", .{s.string});
             return false;
@@ -214,10 +206,6 @@ fn testValid(dir: *const std.fs.Dir, path: []const u8, basename: []const u8) !bo
 
     var contents = try f.reader().readAllAlloc(testing.allocator, 5 * 1024 * 1024);
     defer testing.allocator.free(contents);
-
-    // var json_parser = std.json.Parser.init(testing.allocator, false);
-    // defer json_parser.deinit();
-    // var expected = try json_parser.parse(contents);
 
     var expected = try std.json.parseFromSlice(std.json.Value, testing.allocator, contents, .{});
     defer expected.deinit();
