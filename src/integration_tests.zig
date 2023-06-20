@@ -30,56 +30,53 @@ fn jsonValueEquality(actual: *const std.json.Value, expected: *const std.json.Va
     }
 
     switch (actual.*) {
-        .String => |s| return std.mem.eql(u8, s, expected.String),
-        .Integer => |i| return i == expected.Integer,
-        .Bool => |a| return a == expected.Bool,
-        .Float => |f| return switch (expected.*) {
-            .Float => |f2| f == f2,
-            .Integer => |i| f == @intToFloat(f64, i),
+        .string => |s| return std.mem.eql(u8, s, expected.string),
+        .integer => |i| return i == expected.integer,
+        .bool => |a| return a == expected.bool,
+        .float => |f| return switch (expected.*) {
+            .float => |f2| f == f2,
+            .integer => |i| f == @intToFloat(f64, i),
             else => false,
         },
-        .Null, .NumberString => return false,
+        .null, .number_string => return false,
         else => return false,
     }
 }
 
 pub fn jsonEquality(gpa: std.mem.Allocator, actual: *const std.json.Value, expected: *const std.json.Value) !bool {
-    if (expected.* == .Object and expected.Object.contains("type")) {
-        var t = expected.Object.get("type") orelse unreachable;
-        var s = expected.Object.get("value") orelse unreachable;
+    if (expected.* == .object and expected.object.contains("type")) {
+        var t = expected.object.get("type") orelse unreachable;
+        var s = expected.object.get("value") orelse unreachable;
 
-        if (std.mem.eql(u8, t.String, "string")) {
-            if (actual.* != .String) return false;
+        if (std.mem.eql(u8, t.string, "string")) {
+            if (actual.* != .string) return false;
 
-            return std.mem.eql(u8, actual.String, s.String);
+            return std.mem.eql(u8, actual.string, s.string);
         }
 
-        if (std.mem.eql(u8, t.String, "float")) {
-            if (actual.* != .Float) return false;
+        if (std.mem.eql(u8, t.string, "float")) {
+            if (actual.* != .float) return false;
 
-            if (std.mem.eql(u8, s.String, "inf") or (std.mem.eql(u8, s.String, "+inf") or (std.mem.eql(u8, s.String, "-inf"))))
-                return std.math.inf(f64) == actual.Float;
+            if (std.mem.eql(u8, s.string, "inf") or (std.mem.eql(u8, s.string, "+inf") or (std.mem.eql(u8, s.string, "-inf"))))
+                return std.math.inf(f64) == actual.float;
 
-            if (std.mem.eql(u8, s.String, "nan") or (std.mem.eql(u8, s.String, "+nan") or (std.mem.eql(u8, s.String, "-nan"))))
-                return std.math.isNan(actual.Float);
+            if (std.mem.eql(u8, s.string, "nan") or (std.mem.eql(u8, s.string, "+nan") or (std.mem.eql(u8, s.string, "-nan"))))
+                return std.math.isNan(actual.float);
         }
 
-        var p = std.json.Parser.init(gpa, false);
-        defer p.deinit();
-
-        var tree = p.parse(s.String) catch {
-            if (dbg) std.debug.print("could not parse '{s}'", .{s.String});
+        var parsed = std.json.parseFromSlice(std.json.Value, gpa, s.string, .{}) catch {
+            if (dbg) std.debug.print("could not parse '{s}'", .{s.string});
             return false;
         };
-        defer tree.deinit();
+        defer parsed.deinit();
 
-        return jsonValueEquality(actual, &tree.root);
+        return jsonValueEquality(actual, &parsed.value);
     }
 
     switch (actual.*) {
-        .Array => {
-            var arr_actual = actual.Array.items;
-            var arr_expected = expected.Array.items;
+        .array => {
+            var arr_actual = actual.array.items;
+            var arr_expected = expected.array.items;
             if (arr_actual.len != arr_expected.len) return false;
 
             for (arr_actual, 0..) |value_a, i| {
@@ -90,9 +87,9 @@ pub fn jsonEquality(gpa: std.mem.Allocator, actual: *const std.json.Value, expec
 
             return true;
         },
-        .Object => {
-            var tbl_a = actual.Object;
-            var tbl_e = expected.Object;
+        .object => {
+            var tbl_a = actual.object;
+            var tbl_e = expected.object;
             if (tbl_a.count() != tbl_e.count()) {
                 if (dbg) std.debug.print("wrong count\n", .{});
                 return false;
@@ -116,16 +113,16 @@ pub fn jsonEquality(gpa: std.mem.Allocator, actual: *const std.json.Value, expec
 
 pub fn tomlValueToJson(allocator: std.mem.Allocator, v: *parser.Value) !std.json.Value {
     return switch (v.*) {
-        .string => |s| std.json.Value{ .String = s },
-        .integer => |s| std.json.Value{ .Integer = s },
-        .float => |f| std.json.Value{ .Float = f },
-        .boolean => |b| std.json.Value{ .Bool = b },
+        .string => |s| std.json.Value{ .string = s },
+        .integer => |s| std.json.Value{ .integer = s },
+        .float => |f| std.json.Value{ .float = f },
+        .boolean => |b| std.json.Value{ .bool = b },
         .array => |*a| b: {
             var al = try std.json.Array.initCapacity(allocator, a.array.items.len);
             for (a.array.items) |*value| {
                 al.appendAssumeCapacity(try tomlValueToJson(allocator, value));
             }
-            break :b std.json.Value{ .Array = al };
+            break :b std.json.Value{ .array = al };
         },
         .table => |*t| try tableToJson(allocator, t),
     };
@@ -141,7 +138,7 @@ pub fn tableToJson(allocator: std.mem.Allocator, table: *parser.Table) error{Out
         try obj.put(entry.key_ptr.*, v);
     }
 
-    return std.json.Value{ .Object = obj };
+    return std.json.Value{ .object = obj };
 }
 
 fn expectParseEqualToJson(src: []const u8, json: []const u8) !void {
@@ -210,13 +207,10 @@ fn testValid(dir: *const std.fs.Dir, path: []const u8, basename: []const u8) !bo
     var contents = try f.reader().readAllAlloc(testing.allocator, 5 * 1024 * 1024);
     defer testing.allocator.free(contents);
 
-    var json_parser = std.json.Parser.init(testing.allocator, false);
-    defer json_parser.deinit();
-
-    var expected = try json_parser.parse(contents);
+    var expected = try std.json.parseFromSlice(std.json.Value, testing.allocator, contents, .{});
     defer expected.deinit();
 
-    if (!try jsonEquality(arena.allocator(), &actual, &expected.root)) {
+    if (!try jsonEquality(arena.allocator(), &actual, &expected.value)) {
         std.debug.print("{s}\n", .{full_path});
         return true;
     }
@@ -235,7 +229,7 @@ test "invalid" {
     var walker = try dir.walk(testing.allocator);
     defer walker.deinit();
     while (try walker.next()) |entry| {
-        if (entry.kind != .File) continue;
+        if (entry.kind != .file) continue;
 
         fail = fail or try testInvalid(&entry.dir, entry.path, entry.basename);
     }
@@ -252,7 +246,7 @@ test "valid" {
     var walker = try dir.walk(testing.allocator);
     defer walker.deinit();
     while (try walker.next()) |entry| {
-        if (entry.kind != .File) continue;
+        if (entry.kind != .file) continue;
         if (std.mem.endsWith(u8, entry.basename, "json")) continue;
 
         fail = fail or try testValid(&entry.dir, entry.path, entry.basename);
@@ -270,7 +264,7 @@ test "fuzz" {
     var walker = try dir.walk(testing.allocator);
     defer walker.deinit();
     while (try walker.next()) |entry| {
-        if (entry.kind != .File) continue;
+        if (entry.kind != .file) continue;
 
         var full_path = try entry.dir.realpathAlloc(testing.allocator, entry.basename);
         defer testing.allocator.free(full_path);
@@ -384,17 +378,17 @@ test "snooker" {
         \\{
         \\    "name": "snooker",
         \\    "goat": {
+        \\        "triple-crowns": {
+        \\            "uks": 7,
+        \\            "masters": 7,
+        \\            "worlds": 7
+        \\        },
+        \\        "name": "Ronnie o' Sullivan",
+        \\        "age": 46,
         \\        "hobbies": [
         \\            "running",
         \\            "hustling at pool"
-        \\        ],
-        \\        "name": "Ronnie o' Sullivan",
-        \\        "age": 46,
-        \\        "triple-crowns": {
-        \\            "masters": 7,
-        \\            "worlds": 7,
-        \\            "uks": 7
-        \\        }
+        \\        ]
         \\    }
         \\}
     );
@@ -514,36 +508,37 @@ test "helix config" {
         \\    "keys": {
         \\        "normal": {
         \\            "A-K": "remove_selections",
+        \\            "space": {
+        \\                "c": {
+        \\                    "a": "code_action",
+        \\                    "R": "rename_symbol",
+        \\                    "S": "workspace_symbol_picker",
+        \\                    "s": "symbol_picker",
+        \\                    "D": "workspace_diagnostics_picker",
+        \\                    "d": "diagnostics_picker"
+        \\                },
+        \\                "space": "file_picker",
+        \\                ",": "buffer_picker"
+        \\            },
+        \\            "K": "extend_line_up",
+        \\            ";": "keep_primary_selection",
+        \\            "H": "extend_char_left",
+        \\            ",": "collapse_selection",
+        \\            "A-k": "keep_selections",
+        \\            "B": "extend_prev_word_start",
+        \\            "W": "extend_next_word_start",
+        \\            "X": "extend_line_below",
+        \\            "L": "extend_char_right",
+        \\            "J": "extend_line_down",
         \\            "N": "extend_search_next",
         \\            "E": "extend_next_word_end",
-        \\            "space": {
-        \\                "space": "file_picker",
-        \\                ",": "buffer_picker",
-        \\                "c": {
-        \\                    "S": "workspace_symbol_picker",
-        \\                    "R": "rename_symbol",
-        \\                    "a": "code_action",
-        \\                    "d": "diagnostics_picker",
-        \\                    "s": "symbol_picker",
-        \\                    "D": "workspace_diagnostics_picker"
-        \\                }
-        \\            },
-        \\            "W": "extend_next_word_start",
-        \\            ";": "keep_primary_selection",
-        \\            "B": "extend_prev_word_start",
-        \\            "L": "extend_char_right",
-        \\            "A-k": "keep_selections",
-        \\            "X": "extend_line_below",
-        \\            ",": "collapse_selection",
-        \\            "A-J": "join_selections",
-        \\            "K": "extend_line_up",
-        \\            "H": "extend_char_left",
-        \\            "J": "extend_line_down"
+        \\            "A-J": "join_selections"
         \\        }
         \\    },
         \\    "theme": "ayu_dark",
         \\    "editor": {
         \\        "line-number": "relative",
+        \\        "true-color": true,
         \\        "statusline": {
         \\            "right": [
         \\                "diagnostics",
@@ -562,17 +557,16 @@ test "helix config" {
         \\                "file-name"
         \\            ]
         \\        },
-        \\        "cursor-shape": {
-        \\            "normal": "block",
-        \\            "insert": "bar",
-        \\            "select": "underline"
-        \\        },
-        \\        "scrolloff": 0,
         \\        "rulers": [
         \\            80,
         \\            120
         \\        ],
-        \\        "true-color": true
+        \\        "cursor-shape": {
+        \\            "select": "underline",
+        \\            "insert": "bar",
+        \\            "normal": "block"
+        \\        },
+        \\        "scrolloff": 0
         \\    }
         \\}
     );
@@ -616,50 +610,50 @@ test "cargo" {
         \\zstd = { version = "0.5", optional = true }
     ,
         \\{
-        \\    "lib": {
-        \\        "name": "tiled",
-        \\        "path": "src/lib.rs"
-        \\    },
-        \\    "dependencies": {
-        \\        "xml-rs": "0.8",
-        \\        "base64": "0.10",
-        \\        "libflate": "0.1.18",
-        \\        "zstd": {
-        \\            "optional": true,
-        \\            "version": "0.5"
-        \\        }
-        \\    },
-        \\    "features": {
-        \\        "default": [
-        \\            "zstd"
-        \\        ]
-        \\    },
         \\    "example": [
         \\        {
-        \\            "name": "example",
-        \\            "path": "examples/main1.rs"
+        \\            "path": "examples/main1.rs",
+        \\            "name": "example"
         \\        },
         \\        {
-        \\            "name": "example",
-        \\            "path": "examples/main2.rs"
+        \\            "path": "examples/main2.rs",
+        \\            "name": "example"
         \\        }
         \\    ],
+        \\    "dependencies": {
+        \\        "libflate": "0.1.18",
+        \\        "xml-rs": "0.8",
+        \\        "zstd": {
+        \\            "version": "0.5",
+        \\            "optional": true
+        \\        },
+        \\        "base64": "0.10"
+        \\    },
         \\    "package": {
-        \\        "name": "tiled",
+        \\        "repository": "https://github.com/mattyhall/rs-tiled.git",
+        \\        "version": "0.9.3",
+        \\        "license": "MIT",
         \\        "keywords": [
         \\            "tiled",
         \\            "tmx",
         \\            "map"
         \\        ],
-        \\        "version": "0.9.3",
-        \\        "description": "A rust crate for loading in maps created by the Tiled editor",
         \\        "authors": [
         \\            "Matthew Hall <matthew@quickbeam.me.uk>"
         \\        ],
-        \\        "repository": "https://github.com/mattyhall/rs-tiled.git",
+        \\        "description": "A rust crate for loading in maps created by the Tiled editor",
+        \\        "name": "tiled",
         \\        "edition": "2018",
-        \\        "readme": "README.md",
-        \\        "license": "MIT"
+        \\        "readme": "README.md"
+        \\    },
+        \\    "lib": {
+        \\        "path": "src/lib.rs",
+        \\        "name": "tiled"
+        \\    },
+        \\    "features": {
+        \\        "default": [
+        \\            "zstd"
+        \\        ]
         \\    }
         \\}
     );
@@ -694,6 +688,11 @@ test "fruits" {
         \\{
         \\    "fruits": [
         \\        {
+        \\            "physical": {
+        \\                "color": "red",
+        \\                "shape": "round"
+        \\            },
+        \\            "name": "apple",
         \\            "varieties": [
         \\                {
         \\                    "rating": {
@@ -705,20 +704,15 @@ test "fruits" {
         \\                {
         \\                    "name": "granny smith"
         \\                }
-        \\            ],
-        \\            "name": "apple",
-        \\            "physical": {
-        \\                "shape": "round",
-        \\                "color": "red"
-        \\            }
+        \\            ]
         \\        },
         \\        {
+        \\            "name": "banana",
         \\            "varieties": [
         \\                {
         \\                    "name": "plantain"
         \\                }
-        \\            ],
-        \\            "name": "banana"
+        \\            ]
         \\        }
         \\    ]
         \\}
