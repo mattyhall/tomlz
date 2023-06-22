@@ -2,6 +2,25 @@ const std = @import("std");
 const lex = @import("lexer.zig");
 const testing = std.testing;
 
+const LexError = lex.Lexer.Error;
+const AllocError = std.mem.Allocator.Error;
+
+pub const ParseError = error{
+    UnexpectedToken,
+    UnexpectedChar,
+    NotUTF8,
+    EOF,
+    KeyAlreadyExists,
+    NotTableOrArray,
+    NotTable,
+    NotArray,
+    StringNotEnded,
+    InlineTablesAndArraysAreImmutable,
+    InvalidCodepoint,
+} || LexError || AllocError;
+
+pub const DecodingError = error{MismatchedType, MissingField} || ParseError;
+
 fn locToIndex(src: []const u8, loc: lex.Loc) usize {
     var line: usize = 1;
     var col: usize = 1;
@@ -34,7 +53,7 @@ pub const Lexer = union(enum) {
     real: lex.Lexer,
     fake: lex.Fake,
 
-    fn next(self: *Lexer, force_key: bool) lex.Lexer.Error!?lex.TokLoc {
+    fn next(self: *Lexer, force_key: bool) LexError!?lex.TokLoc {
         return switch (self.*) {
             .real => |*r| r.next(force_key),
             .fake => |*f| f.next(),
@@ -133,7 +152,7 @@ pub const Table = struct {
         }
     }
 
-    fn insert(self: *Table, allocator: std.mem.Allocator, key: []const u8, value: Value) !void {
+    fn insert(self: *Table, allocator: std.mem.Allocator, key: []const u8, value: Value) AllocError!void {
         return try self.table.put(allocator, key, value);
     }
 
@@ -146,7 +165,7 @@ pub const Table = struct {
 
     fn getOrPutArray(self: *Table, allocator: std.mem.Allocator, key: []const u8, source: Array.Source) !*Array {
         var v = try self.table.getOrPutValue(allocator, key, .{ .array = .{ .source = source } });
-        if (v.value_ptr.* != .array) return error.not_array;
+        if (v.value_ptr.* != .array) return error.NotArray;
 
         return &v.value_ptr.array;
     }
@@ -231,7 +250,7 @@ pub const Value = union(enum) {
     table: Table,
     boolean: bool,
 
-    fn dupe(self: *const Value, allocator: std.mem.Allocator) !Value {
+    fn dupe(self: *const Value, allocator: std.mem.Allocator) AllocError!Value {
         return switch (self.*) {
             .string => |s| Value{ .string = try allocator.dupe(u8, s) },
             .array => |a| b: {
@@ -280,34 +299,34 @@ fn unwrapOptionals(comptime T: anytype) std.builtin.Type {
     }
 }
 
-fn decodeValue(comptime T: type, gpa: std.mem.Allocator, v: Value) !T {
+fn decodeValue(comptime T: type, gpa: std.mem.Allocator, v: Value) DecodingError!T {
     const ti = @typeInfo(T);
     const opts_unwrapped_ti = unwrapOptionals(T);
     switch (v) {
         .integer => |i| {
-            if (opts_unwrapped_ti != .Int) return error.MismatchedType;
+            if (opts_unwrapped_ti != .Int) return DecodingError.MismatchedType;
             return @intCast(@Type(opts_unwrapped_ti), i);
         },
         .float => |fl| {
-            if (opts_unwrapped_ti != .Float) return error.MismatchedType;
+            if (opts_unwrapped_ti != .Float) return DecodingError.MismatchedType;
             return @floatCast(@Type(opts_unwrapped_ti), fl);
         },
         .boolean => |b| {
-            if (opts_unwrapped_ti != .Bool) return error.MismatchedType;
+            if (opts_unwrapped_ti != .Bool) return DecodingError.MismatchedType;
             return b;
         },
         .string => |s| {
             if (ti != .Pointer or ti.Pointer.child != u8 or
                 (ti.Pointer.size != .Slice and ti.Pointer.Size != .Many))
             {
-                return error.MismatchedType;
+                return DecodingError.MismatchedType;
             }
 
             return try gpa.dupe(u8, s);
         },
         .array => |a| {
             if (ti != .Pointer or (ti.Pointer.size != .Slice and ti.Pointer.size != .Many))
-                return error.MismatchedType;
+                return DecodingError.MismatchedType;
 
             var al = try std.ArrayList(ti.Pointer.child).initCapacity(gpa, a.items().len);
             errdefer al.deinit();
@@ -323,9 +342,9 @@ fn decodeValue(comptime T: type, gpa: std.mem.Allocator, v: Value) !T {
     }
 }
 
-fn decodeTable(comptime T: anytype, gpa: std.mem.Allocator, table: Table) !T {
+fn decodeTable(comptime T: anytype, gpa: std.mem.Allocator, table: Table) DecodingError!T {
     const ti = @typeInfo(T);
-    if (ti != .Struct) return error.MismatchedTypes;
+    if (ti != .Struct) return DecodingError.MismatchedType;
 
     var strct: T = undefined;
 
@@ -333,7 +352,7 @@ fn decodeTable(comptime T: anytype, gpa: std.mem.Allocator, table: Table) !T {
         const f_ti = @typeInfo(f.type);
         if (!table.contains(f.name)) {
             if (f_ti != .Optional)
-                return error.MissingField
+                return DecodingError.MissingField
             else
                 @field(strct, f.name) = null;
         } else {
@@ -345,7 +364,7 @@ fn decodeTable(comptime T: anytype, gpa: std.mem.Allocator, table: Table) !T {
     return strct;
 }
 
-pub fn decode(comptime T: anytype, gpa: std.mem.Allocator, src: []const u8) !T {
+pub fn decode(comptime T: anytype, gpa: std.mem.Allocator, src: []const u8) DecodingError!T {
     const ti = @typeInfo(T);
     if (ti != .Struct) @compileError("argument T of decode must be a struct");
 
@@ -364,20 +383,20 @@ pub const Parser = struct {
     top_level_table: *Table,
     current_table: *Table,
 
-    pub fn init(allocator: std.mem.Allocator, lexer: Lexer) !Parser {
+    pub fn init(allocator: std.mem.Allocator, lexer: Lexer) AllocError!Parser {
         var table = try allocator.create(Table);
         table.* = .{ .source = .top_level, .closed = false };
         return .{ .allocator = allocator, .lexer = lexer, .top_level_table = table, .current_table = table };
     }
 
-    fn peek(self: *Parser, force_key: bool) !lex.TokLoc {
+    fn peek(self: *Parser, force_key: bool) LexError!lex.TokLoc {
         if (self.peeked) |tokloc| return tokloc;
 
         self.peeked = try self.lexer.next(force_key);
         return self.peeked orelse error.EOF;
     }
 
-    fn pop(self: *Parser, force_key: bool) !lex.TokLoc {
+    fn pop(self: *Parser, force_key: bool) LexError!lex.TokLoc {
         if (self.peeked) |tokloc| {
             self.peeked = null;
             return tokloc;
@@ -450,7 +469,7 @@ pub const Parser = struct {
         }
     }
 
-    fn parseValue(self: *Parser) !Value {
+    fn parseValue(self: *Parser) ParseError!Value {
         const tokloc = try self.pop(false);
         var val = switch (tokloc.tok) {
             .string => |s| Value{ .string = try self.allocator.dupe(u8, s) },
@@ -468,7 +487,7 @@ pub const Parser = struct {
         return val;
     }
 
-    fn skipNewlines(self: *Parser, force_key: bool) !bool {
+    fn skipNewlines(self: *Parser, force_key: bool) LexError!bool {
         var had_newline = false;
         while ((try self.peek(force_key)).tok == .newline) {
             had_newline = true;
@@ -478,18 +497,7 @@ pub const Parser = struct {
     }
 
     /// parseInlineArray parses a value of the form "[ <value-1>, <value-2>, ...]"
-    fn parseInlineArray(self: *Parser) error{
-        OutOfMemory,
-        UnexpectedToken,
-        UnexpectedChar,
-        EOF,
-        KeyAlreadyExists,
-        NotTableOrArray,
-        NotTable,
-        StringNotEnded,
-        InlineTablesAndArraysAreImmutable,
-        InvalidCodepoint,
-    }!Value {
+    fn parseInlineArray(self: *Parser) !Value {
         var al = std.ArrayListUnmanaged(Value){};
         errdefer {
             for (al.items) |*item| {
@@ -546,18 +554,7 @@ pub const Parser = struct {
         }
     }
 
-    fn parseInlineTable(self: *Parser) error{
-        OutOfMemory,
-        UnexpectedToken,
-        UnexpectedChar,
-        EOF,
-        NotTableOrArray,
-        KeyAlreadyExists,
-        NotTable,
-        StringNotEnded,
-        InlineTablesAndArraysAreImmutable,
-        InvalidCodepoint,
-    }!Value {
+    fn parseInlineTable(self: *Parser) !Value {
         const curr = self.current_table;
 
         var tbl = Table{ .source = .@"inline", .closed = false };
@@ -781,7 +778,10 @@ pub const Parser = struct {
     /// header is not a path) and the final key.
     ///
     /// NOTE: The caller is responsible for freeing the key in the result
-    pub fn parseArrayHeaderKey(self: *Parser, key: []const u8, loc: lex.Loc) !struct { table: *Table, key: []const u8 } {
+    pub fn parseArrayHeaderKey(self: *Parser, key: []const u8, loc: lex.Loc) ParseError!struct {
+        table: *Table,
+        key: []const u8,
+    } {
         var al = std.ArrayList([]const u8).init(self.allocator);
         defer {
             for (al.items) |s| self.allocator.free(s);
@@ -866,7 +866,7 @@ pub const Parser = struct {
         try self.expect(.newline, "\n");
     }
 
-    pub fn parse(self: *Parser) !Table {
+    pub fn parse(self: *Parser) ParseError!Table {
         while (true) {
             const tokloc = self.pop(true) catch |err| switch (err) {
                 error.EOF => {
@@ -916,7 +916,7 @@ pub const Parser = struct {
 };
 
 /// parse takes a given TOML source and returns a Table which has been allocated with the given allocator.
-pub fn parse(allocator: std.mem.Allocator, src: []const u8) !Table {
+pub fn parse(allocator: std.mem.Allocator, src: []const u8) ParseError!Table {
     var parser = try Parser.init(allocator, .{ .real = try lex.Lexer.init(allocator, src) });
     defer parser.deinit();
 
@@ -926,7 +926,7 @@ pub fn parse(allocator: std.mem.Allocator, src: []const u8) !Table {
 const KV = struct { k: []const u8, v: Value };
 
 /// kvsToTable takes a slice of KVs (i.e. assignments) and returns the table they would make
-fn kvsToTable(kvs: []const KV) !Table {
+fn kvsToTable(kvs: []const KV) AllocError!Table {
     var table = Table{ .source = .assignment, .closed = false };
     for (kvs) |entry| {
         const v = try entry.v.dupe(testing.allocator);
@@ -936,7 +936,7 @@ fn kvsToTable(kvs: []const KV) !Table {
 }
 
 /// toksToLocToks takes a slice of toks and gives them a dummy location
-fn toksToLocToks(toks: []const lex.Tok) ![]lex.TokLoc {
+fn toksToLocToks(toks: []const lex.Tok) AllocError![]lex.TokLoc {
     const loc = lex.Loc{ .line = 1, .col = 1 };
 
     var al = std.ArrayListUnmanaged(lex.TokLoc){};
@@ -948,7 +948,7 @@ fn toksToLocToks(toks: []const lex.Tok) ![]lex.TokLoc {
 }
 
 /// testParse takes the given toks and parses them into a table
-fn testParse(toks: []const lex.Tok) !Table {
+fn testParse(toks: []const lex.Tok) ParseError!Table {
     var toklocs = try toksToLocToks(toks);
     defer testing.allocator.free(toklocs);
 
@@ -1254,7 +1254,7 @@ test "fail: arrays" {
             .{ .key = "baz" }, .equals, .{ .string = "b" }, .newline,
     });
 
-    try expectErrorParse(error.not_array, &.{
+    try expectErrorParse(error.NotArray, &.{
             .open_square_bracket, .{ .key="foo" }, .close_square_bracket, .newline,
             .{ .key = "baz" }, .equals, .{ .string = "b" }, .newline,
 
@@ -1287,7 +1287,7 @@ test "array of tables" {
 
 test "fail: array of tables" {
     // zig fmt: off
-    try expectErrorParse(error.not_array, &.{
+    try expectErrorParse(error.NotArray, &.{
             .open_square_bracket, .{ .key="foo" }, .dot, .{ .key = "bar"}, .close_square_bracket, .newline,
             .{ .key = "baz" }, .equals, .{ .string = "b" }, .newline,
 

@@ -1,6 +1,8 @@
 const std = @import("std");
 const testing = std.testing;
 
+const AllocError = std.mem.Allocator.Error;
+
 pub const Loc = struct {
     line: u64,
     col: u64,
@@ -23,7 +25,7 @@ pub const Tok = union(enum) {
     float: f64,
     boolean: bool,
 
-    pub fn dupe(self: Tok, allocator: std.mem.Allocator) !Tok {
+    pub fn dupe(self: Tok, allocator: std.mem.Allocator) AllocError!Tok {
         return switch (self) {
             .key => |k| Tok{ .key = try allocator.dupe(u8, k) },
             .string => |k| Tok{ .string = try allocator.dupe(u8, k) },
@@ -57,11 +59,17 @@ pub const Lexer = struct {
     index: usize,
     diag: ?Diagnostic,
 
-    pub const Error = error{ EOF, UnexpectedChar, OutOfMemory, StringNotEnded, InvalidCodepoint };
+    pub const Error = error{
+        EOF,
+        UnexpectedChar,
+        OutOfMemory,
+        StringNotEnded,
+        InvalidCodepoint,
+    };
 
     pub fn init(allocator: std.mem.Allocator, src: []const u8) !Lexer {
         if (!std.unicode.utf8ValidateSlice(src))
-            return error.not_utf8;
+            return error.NotUTF8;
 
         var arena = std.heap.ArenaAllocator.init(allocator);
         return Lexer{ .arena = arena, .source = src, .loc = .{ .line = 1, .col = 1 }, .diag = null, .index = 0 };
