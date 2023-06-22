@@ -19,7 +19,7 @@ pub const ParseError = error{
     InvalidCodepoint,
 } || LexError || AllocError;
 
-pub const DecodingError = error{MismatchedType, MissingField} || ParseError;
+pub const DecodingError = error{ MismatchedType, MissingField } || ParseError;
 
 fn locToIndex(src: []const u8, loc: lex.Loc) usize {
     var line: usize = 1;
