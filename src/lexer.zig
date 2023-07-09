@@ -132,7 +132,7 @@ pub const Lexer = struct {
         while (true) : (i += 1) {
             const c = try self.peek();
             const n = std.fmt.parseInt(u21, &.{c}, 16) catch {
-                if (i == @intCast(usize, len) + 1) {
+                if (i == @as(usize, @intCast(len)) + 1) {
                     const written = std.unicode.utf8Encode(codepoint, &buf) catch return error.InvalidCodepoint;
                     try al.appendSlice(self.arena.allocator(), buf[0..written]);
                     return;
@@ -143,7 +143,7 @@ pub const Lexer = struct {
 
             _ = self.pop() catch unreachable;
 
-            if (std.math.maxInt(u21) < 16 * @intCast(u64, codepoint) + n) return error.InvalidCodepoint;
+            if (std.math.maxInt(u21) < 16 * @as(u64, @intCast(codepoint)) + n) return error.InvalidCodepoint;
 
             codepoint = codepoint * 16 + n;
             if (i == len) {

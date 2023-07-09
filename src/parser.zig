@@ -305,11 +305,11 @@ fn decodeValue(comptime T: type, gpa: std.mem.Allocator, v: Value) DecodingError
     switch (v) {
         .integer => |i| {
             if (opts_unwrapped_ti != .Int) return DecodingError.MismatchedType;
-            return @intCast(@Type(opts_unwrapped_ti), i);
+            return @intCast(i);
         },
         .float => |fl| {
             if (opts_unwrapped_ti != .Float) return DecodingError.MismatchedType;
-            return @floatCast(@Type(opts_unwrapped_ti), fl);
+            return @floatCast(fl);
         },
         .boolean => |b| {
             if (opts_unwrapped_ti != .Bool) return DecodingError.MismatchedType;

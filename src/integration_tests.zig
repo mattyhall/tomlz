@@ -35,7 +35,7 @@ fn jsonValueEquality(actual: *const std.json.Value, expected: *const std.json.Va
         .bool => |a| return a == expected.bool,
         .float => |f| return switch (expected.*) {
             .float => |f2| f == f2,
-            .integer => |i| f == @floatFromInt(f64, i),
+            .integer => |i| f == @as(f64, @floatFromInt(i)),
             else => false,
         },
         .null, .number_string => return false,
