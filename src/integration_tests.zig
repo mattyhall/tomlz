@@ -148,11 +148,18 @@ fn expectParseEqualToJson(src: []const u8, json: []const u8) !void {
     var actual_al = std.ArrayList(u8).init(testing.allocator);
     defer actual_al.deinit();
 
+    var json_writer = std.json.writeStreamArbitraryDepth(
+        testing.allocator,
+        actual_al.writer(),
+        .{ .whitespace = .indent_4 },
+    );
+    defer json_writer.deinit();
+
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
     var actual_json = try tableToJson(arena.allocator(), &table);
-    try actual_json.jsonStringify(.{ .whitespace = .{} }, actual_al.writer());
+    try actual_json.jsonStringify(&json_writer);
 
     try testing.expectEqualStrings(json, actual_al.items);
 }
