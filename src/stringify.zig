@@ -532,3 +532,32 @@ test "stringify with custom function" {
         \\
     );
 }
+
+test "stringify tomlz table" {
+    const tomlz = @import("main.zig");
+    const Table = tomlz.Table;
+    const Value = tomlz.Value;
+
+    var table = Table{
+        .source = .top_level,
+        .closed = false,
+    };
+    defer table.deinit(testing.allocator);
+
+    try table.table.put(
+        testing.allocator,
+        try testing.allocator.dupe(u8, "somevalue"),
+        Value{ .integer = 42 },
+    );
+    try table.table.put(
+        testing.allocator,
+        try testing.allocator.dupe(u8, "somestring"),
+        Value{ .string = try testing.allocator.dupe(u8, "notastring") },
+    );
+
+    try testWriteStream(table, null,
+        \\somestring = "notastring"
+        \\somevalue = 42
+        \\
+    );
+}

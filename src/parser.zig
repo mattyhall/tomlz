@@ -179,6 +179,15 @@ pub const Table = struct {
 
         self.table.deinit(allocator);
     }
+
+    pub fn tomlzStringify(self: *const Table, writer: anytype) !void {
+        try writer.beginTable();
+
+        var it = self.table.iterator();
+        while (it.next()) |entry| {
+            try writer.writeKeyValue(entry.key_ptr.*, entry.value_ptr.*);
+        }
+    }
 };
 
 pub const Array = struct {
@@ -238,6 +247,10 @@ pub const Array = struct {
             .array => |a| return a,
             else => return null,
         }
+    }
+
+    pub fn tomlzStringify(self: *const Array, writer: anytype) !void {
+        return writer.write(self.items());
     }
 };
 
