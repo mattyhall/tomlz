@@ -48,6 +48,9 @@ pub fn WriteStream(comptime OutStream: type) type {
                     }
                 },
                 .Struct => {
+                    if (comptime std.meta.trait.hasFn("tomlzStringify")(T)) {
+                        return value.tomlzStringify(self);
+                    }
                     return self.writeTable(value);
                 },
                 .Pointer => |ptr_info| switch (ptr_info.size) {
@@ -181,10 +184,7 @@ pub fn WriteStream(comptime OutStream: type) type {
                 return;
             }
 
-            if (self.key_stack.items.len > 0) {
-                // this is the root table
-                try self.beginObject();
-            }
+            try self.beginTable();
 
             inline for (S.fields) |Field| {
                 if (comptime !canInline(Field.type)) continue;
@@ -224,8 +224,9 @@ pub fn WriteStream(comptime OutStream: type) type {
             try self.stream.writeAll(" = ");
         }
 
-        pub fn beginObject(self: *Self) Error!void {
-            if (self.key_stack.items.len == 0) return error.NoKey;
+        pub fn beginTable(self: *Self) Error!void {
+            // this is the root table
+            if (self.key_stack.items.len == 0) return; 
 
             if (self.array_depth > 0) {
                 try self.stream.writeAll("[[");
@@ -484,6 +485,21 @@ test "stringify array of nested tables" {
         \\content = "you"
         \\[[arr.as]]
         \\content = "down"
+        \\
+    );
+}
+
+test "stringify with custom function" {
+    const A = struct {
+        pub fn tomlzStringify(self: *const @This(), stream: anytype) !void {
+            _ = self;
+            try stream.beginTable();
+            try stream.writeKeyValue("i_dont", "exist");
+        }
+    };
+
+    try testWriteStream(A{}, null,
+        \\i_dont = "exist"
         \\
     );
 }
