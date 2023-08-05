@@ -2,6 +2,7 @@ const std = @import("std");
 const testing = std.testing;
 pub const lex = @import("lexer.zig");
 pub const parser = @import("parser.zig");
+pub const stringify = @import("stringify.zig");
 
 pub const parse = parser.parse;
 pub const Value = parser.Value;
@@ -14,4 +15,5 @@ test "refAllDecls" {
     std.testing.refAllDecls(lex);
     std.testing.refAllDecls(parser);
     std.testing.refAllDecls(integration_tests);
+    std.testing.refAllDecls(stringify);
 }
