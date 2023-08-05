@@ -53,6 +53,26 @@ pub fn WriteStream(comptime OutStream: type) type {
                     }
                     return self.writeTable(value);
                 },
+                .Union => {
+                    if (comptime std.meta.trait.hasFn("tomlzStringify")(T)) {
+                        return value.tomlzStringify(self);
+                    }
+
+                    const info = @typeInfo(T).Union;
+                    if (info.tag_type) |UnionTagType| {
+                        inline for (info.fields) |u_field| {
+                            if (value == @field(UnionTagType, u_field.name)) {
+                                try self.write(@field(value, u_field.name));
+                                break;
+                            }
+                        } else {
+                            unreachable; // No active tag?
+                        }
+                        return;
+                    } else {
+                        @compileError("Unable to stringify untagged union '" ++ @typeName(T) ++ "'");
+                    }
+                },
                 .Pointer => |ptr_info| switch (ptr_info.size) {
                     .One => switch (@typeInfo(ptr_info.child)) {
                         .Array => {
@@ -226,7 +246,7 @@ pub fn WriteStream(comptime OutStream: type) type {
 
         pub fn beginTable(self: *Self) Error!void {
             // this is the root table
-            if (self.key_stack.items.len == 0) return; 
+            if (self.key_stack.items.len == 0) return;
 
             if (self.array_depth > 0) {
                 try self.stream.writeAll("[[");
@@ -363,6 +383,15 @@ test "stringify arrays" {
     // array of arrays
     const array_of_arrays = [_][3]u16{ test_array, test_array };
     try testWriteStream(array_of_arrays, "value", "value = [[1, 2, 3], [1, 2, 3]]\n");
+}
+
+test "stringify union" {
+    const MyUnion = union(enum) {
+        one: u16,
+        two: u16,
+    };
+
+    try testWriteStream(MyUnion{ .two = 2 }, "value", "value = 2\n");
 }
 
 test "stringify table" {
