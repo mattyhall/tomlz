@@ -1,4 +1,5 @@
 const std = @import("std");
+const ascci = std.ascii;
 
 const Allocator = std.mem.Allocator;
 
@@ -234,8 +235,25 @@ pub fn WriteStream(comptime OutStream: type) type {
         }
 
         fn writeKey(self: *Self, key: []const u8) Error!void {
-            //TODO: quote if non ascii
+            var is_bare = true;
+            for (key) |char| {
+                if (ascci.isAlphanumeric(char)) continue;
+
+                if (char != '_' and char != '-') {
+                    is_bare = false;
+                    break;
+                }
+            }
+
+            if (!is_bare) {
+                try self.stream.writeByte('"');
+            }
+
             try self.stream.writeAll(key);
+
+            if (!is_bare) {
+                try self.stream.writeByte('"');
+            }
         }
 
         fn writeAssignment(self: *Self) Error!void {
@@ -560,4 +578,9 @@ test "stringify tomlz table" {
         \\somevalue = 42
         \\
     );
+}
+
+test "stringify correctly quote keys" {
+    try testWriteStream(42, "ASCII_encoded-key42", "ASCII_encoded-key42 = 42\n");
+    try testWriteStream(42, "mr🐢turtle", "\"mr🐢turtle\" = 42\n");
 }
