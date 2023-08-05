@@ -3,7 +3,38 @@ const ascci = std.ascii;
 
 const Allocator = std.mem.Allocator;
 
-pub const StringifyError = error{
+pub fn serialize(
+    allocator: Allocator,
+    out_stream: anytype,
+    value: anytype,
+) (@TypeOf(out_stream).Error || SerializeError)!void {
+    var toml_writer = writeStream(allocator, out_stream);
+    defer toml_writer.deinit();
+    try toml_writer.write(value);
+}
+
+pub fn serializeKeyValue(
+    allocator: Allocator,
+    out_stream: anytype,
+    key: []const u8,
+    value: anytype,
+) (@TypeOf(out_stream).Error || SerializeError)!void {
+    var toml_writer = writeStream(allocator, out_stream);
+    defer toml_writer.deinit();
+    try toml_writer.writeKeyValue(key, value);
+}
+
+pub fn writeStream(
+    allocator: Allocator,
+    out_stream: anytype,
+) WriteStream(@TypeOf(out_stream)) {
+    return .{
+        .stream = out_stream,
+        .key_stack = std.ArrayList([]const u8).init(allocator),
+    };
+}
+
+pub const SerializeError = error{
     NoKey,
     NotRepresentable,
 };
@@ -12,7 +43,7 @@ pub fn WriteStream(comptime OutStream: type) type {
     return struct {
         const Self = @This();
 
-        const Error = OutStream.Error || StringifyError;
+        const Error = OutStream.Error || SerializeError;
 
         stream: OutStream,
 
@@ -49,14 +80,14 @@ pub fn WriteStream(comptime OutStream: type) type {
                     }
                 },
                 .Struct => {
-                    if (comptime std.meta.trait.hasFn("tomlzStringify")(T)) {
-                        return value.tomlzStringify(self);
+                    if (comptime std.meta.trait.hasFn("tomlzSerialize")(T)) {
+                        return value.tomlzSerialize(self);
                     }
                     return self.writeTable(value);
                 },
                 .Union => {
-                    if (comptime std.meta.trait.hasFn("tomlzStringify")(T)) {
-                        return value.tomlzStringify(self);
+                    if (comptime std.meta.trait.hasFn("tomlzSerialize")(T)) {
+                        return value.tomlzSerialize(self);
                     }
 
                     const info = @typeInfo(T).Union;
@@ -71,7 +102,7 @@ pub fn WriteStream(comptime OutStream: type) type {
                         }
                         return;
                     } else {
-                        @compileError("Unable to stringify untagged union '" ++ @typeName(T) ++ "'");
+                        @compileError("Unable to serialize untagged union '" ++ @typeName(T) ++ "'");
                     }
                 },
                 .Pointer => |ptr_info| switch (ptr_info.size) {
@@ -87,7 +118,7 @@ pub fn WriteStream(comptime OutStream: type) type {
                     },
                     .Many, .Slice => {
                         if (ptr_info.size == .Many and ptr_info.sentinel == null)
-                            @compileError("Unable to stringify type '" ++ @typeName(T) ++ "' without sentinel");
+                            @compileError("Unable to serialize type '" ++ @typeName(T) ++ "' without sentinel");
                         const slice = if (ptr_info.size == .Many) std.mem.span(value) else value;
 
                         if (comptime canInline(T)) {
@@ -116,7 +147,7 @@ pub fn WriteStream(comptime OutStream: type) type {
                     return self.write(&array);
                 },
                 .Void => {},
-                else => @compileError("Unable to stringify type '" ++ @typeName(T) ++ "'."),
+                else => @compileError("Unable to serialize type '" ++ @typeName(T) ++ "'."),
             };
         }
 
@@ -168,7 +199,7 @@ pub fn WriteStream(comptime OutStream: type) type {
                     },
                     .Many, .Slice => {
                         if (ptr_info.size == .Many and ptr_info.sentinel == null)
-                            @compileError("Unable to stringify type '" ++ @typeName(T) ++ "' without sentinel");
+                            @compileError("Unable to serialize type '" ++ @typeName(T) ++ "' without sentinel");
                         const slice = if (ptr_info.size == .Many) std.mem.span(value) else value;
 
                         // This is a []const u8, or some similar Zig string.
@@ -328,9 +359,10 @@ fn testWriteStream(value: anytype, key: ?[]const u8, expected: []const u8) !void
     defer stream.deinit();
 
     if (key) |payload| {
-        try stream.pushKey(payload);
+        try serializeKeyValue(testing.allocator, writer, payload, value);
+    } else {
+        try serialize(testing.allocator, writer, value);
     }
-    try stream.write(value);
 
     try testing.expectEqualStrings(expected, buffer.items);
 }
@@ -355,7 +387,7 @@ fn testWriteStreamFailure(value: anytype, key: ?[]const u8, err: anyerror) !void
     try testing.expectError(err, stream.write(value));
 }
 
-test "stringify basic types" {
+test "encode basic types" {
     // integers
     try testWriteStream(42, "truth", "truth = 42\n"); // this tests comptime_int
     try testWriteStream(@as(u16, 42), "truth", "truth = 42\n");
@@ -387,7 +419,7 @@ test "stringify basic types" {
     try testWriteStream("test", "value", "value = \"test\"\n");
 }
 
-test "stringify arrays" {
+test "encode arrays" {
     const test_array = [_]u16{ 1, 2, 3 };
     // arrays
     try testWriteStream(test_array, "value", "value = [1, 2, 3]\n");
@@ -403,7 +435,7 @@ test "stringify arrays" {
     try testWriteStream(array_of_arrays, "value", "value = [[1, 2, 3], [1, 2, 3]]\n");
 }
 
-test "stringify union" {
+test "encode union" {
     const MyUnion = union(enum) {
         one: u16,
         two: u16,
@@ -412,7 +444,7 @@ test "stringify union" {
     try testWriteStream(MyUnion{ .two = 2 }, "value", "value = 2\n");
 }
 
-test "stringify table" {
+test "encode table" {
     // empty table
     try testWriteStream(.{}, "empty", "[empty]\n");
 
@@ -448,7 +480,7 @@ test "stringify table" {
     );
 }
 
-test "stringify array of tables" {
+test "encode array of tables" {
     const MyStruct = struct {
         field1: u16 = 1,
         field2: u16 = 2,
@@ -467,7 +499,7 @@ test "stringify array of tables" {
     );
 }
 
-test "stringify array of nested tables" {
+test "encode array of nested tables" {
     const A = struct { content: []const u8 };
 
     const B = struct {
@@ -536,9 +568,9 @@ test "stringify array of nested tables" {
     );
 }
 
-test "stringify with custom function" {
+test "encode with custom function" {
     const A = struct {
-        pub fn tomlzStringify(self: *const @This(), stream: anytype) !void {
+        pub fn tomlzSerialize(self: *const @This(), stream: anytype) !void {
             _ = self;
             try stream.beginTable();
             try stream.writeKeyValue("i_dont", "exist");
@@ -551,7 +583,7 @@ test "stringify with custom function" {
     );
 }
 
-test "stringify tomlz table" {
+test "encode tomlz table" {
     const tomlz = @import("main.zig");
     const Table = tomlz.Table;
     const Value = tomlz.Value;
@@ -580,7 +612,7 @@ test "stringify tomlz table" {
     );
 }
 
-test "stringify correctly quote keys" {
+test "encode correctly quote keys" {
     try testWriteStream(42, "ASCII_encoded-key42", "ASCII_encoded-key42 = 42\n");
     try testWriteStream(42, "mr🐢turtle", "\"mr🐢turtle\" = 42\n");
 }

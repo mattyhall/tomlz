@@ -180,7 +180,7 @@ pub const Table = struct {
         self.table.deinit(allocator);
     }
 
-    pub fn tomlzStringify(self: *const Table, writer: anytype) !void {
+    pub fn tomlzSerialize(self: *const Table, writer: anytype) !void {
         try writer.beginTable();
 
         var it = self.table.iterator();
@@ -249,7 +249,7 @@ pub const Array = struct {
         }
     }
 
-    pub fn tomlzStringify(self: *const Array, writer: anytype) !void {
+    pub fn tomlzSerialize(self: *const Array, writer: anytype) !void {
         return writer.write(self.items());
     }
 };
