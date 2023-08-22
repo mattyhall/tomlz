@@ -37,7 +37,7 @@
           rec {
             devShell = pkgs.mkShell {
               buildInputs = (with pkgs; [
-                zigpkgs.master-2023-07-02
+                zigpkgs.master-2023-08-04
                 zlspkgs.default
                 bashInteractive
                 gdb
