@@ -55,13 +55,13 @@ In your `build.zig` file create and use the dependency
 pub fn build(b: *std.Build) void {
     // ... setup ...
 
-    const ziglua = b.dependency("tomlz", .{
+    const tomlz = b.dependency("tomlz", .{
         .target = target,
         .optimize = optimize,
     });
 
     // add the tomlz module 
-    exe.addModule("tomlz", ziglua.module("tomlz"));
+    exe.addModule("tomlz", tomlz.module("tomlz"));
 
     // .. continue ...
 }

@@ -10,17 +10,17 @@ pub fn build(b: *std.build.Builder) void {
         .target = target,
         .optimize = optimize,
     });
-    
+
     // If we have the project in our repository then we can just add it as a module
     const tomlz = b.addModule("tomlz", .{
-        .source_file = .{ .path = "../../src/main.zig"},
+        .source_file = .{ .path = "../../src/main.zig" },
     });
 
     exe.addModule("tomlz", tomlz);
 
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
-    
+
     if (b.args) |args| {
         run_cmd.addArgs(args);
     }
