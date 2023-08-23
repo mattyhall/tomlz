@@ -1,6 +1,0 @@
-id: kumppqfv7jfmsfk2ht0d7potv12ws30x9e4ql7wqwk564pt1
-name: zigmod-example
-license: MIT
-description: Example using tomlz from zigmod
-root_dependencies:
-  - src: git https://github.com/mattyhall/tomlz

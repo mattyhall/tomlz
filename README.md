@@ -32,46 +32,39 @@ decoding into a struct directly - including types that must be allocated like
 arrays and strings.
 
 ## Installation
-tomlz supports being a vendored dependency, zigmod and gyro.
+tomlz supports being included as a module.
 
-### zigmod
-To use in a project where your dependencies are handled by
-[zigmod](https://github.com/nektro/zigmod) you can simply run:
-
+Create a file called `build.zig.zon` if you do not already have one, and add `tomlz` as a dependency  
 ```
-$ zigmod aq add 1/mattyhall/tomlz
-$ zigmod fetch
+.{
+    .name = "myproject",
+    .version = "0.1.0",
+    .dependencies = .{
+        .tomlz = .{
+            .url = "https://github.com/mattyhall/tomlz/archive/<commit-hash>.tar.gz",
+            .hash = "12206cf9e90462ee6e14f593ea6e0802b9fe434429ba10992a1451e32900f741005c",
+        },
+    }
+}
 ```
+You'll have to replace the `<commit-hash>` part with an actual, recent commit-hash.
+The hash also needs changing, but `zig build` will complain and give you the correct one.
 
-and import using
-
-```zig
-const tomlz = @import("tomlz");
+In your `build.zig` file create and use the dependency
 ```
+pub fn build(b: *std.Build) void {
+    // ... setup ...
 
-An [example is available](https://github.com/mattyhall/tomlz/tree/main/examples/zigmod).
+    const tomlz = b.dependency("tomlz", .{
+        .target = target,
+        .optimize = optimize,
+    });
 
-### gyro
-To use in a project where your dependencies are handled by
-[gyro](https://github.com/mattnite/gyro) you can simply run:
+    // add the tomlz module 
+    exe.addModule("tomlz", tomlz.module("tomlz"));
 
-```
-$ gyro add mattyhall/tomlz
-$ gyro fetch
-```
-
-An [example is available](https://github.com/mattyhall/tomlz/tree/main/examples/gyro).
-
-### Submodule
-To add as a package a common approach is to clone this repository as a submodule
-in your own, and then add it as a package in `build.zig` like so:
-
-```zig
-    const exe = b.addExecutable("simple", "src/main.zig");
-    exe.setTarget(target);
-    exe.setBuildMode(mode);
-    exe.addPackagePath("tomlz", "third_party/tomlz/src/main.zig");
-    exe.install();
+    // .. continue ...
+}
 ```
 
 ## Usage
