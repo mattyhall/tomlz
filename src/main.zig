@@ -6,6 +6,7 @@ pub const serializer = @import("serializer.zig");
 
 pub const parse = parser.parse;
 pub const serialize = serializer.serialize;
+pub const serializeKeyValue = serializer.serializeKeyValue;
 pub const Value = parser.Value;
 pub const Array = parser.Array;
 pub const Table = parser.Table;

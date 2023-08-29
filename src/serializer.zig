@@ -7,8 +7,18 @@ pub fn serialize(
     allocator: Allocator,
     out_stream: anytype,
     value: anytype,
+) (@TypeOf(out_stream).Error || SerializeError || Allocator.Error)!void {
+    var toml_writer = writeStreamArbitraryDepth(allocator, out_stream);
+    defer toml_writer.deinit();
+    try toml_writer.write(value);
+}
+
+pub fn serializeFixedDepth(
+    comptime depth: usize,
+    out_stream: anytype,
+    value: anytype,
 ) (@TypeOf(out_stream).Error || SerializeError)!void {
-    var toml_writer = writeStream(allocator, out_stream);
+    var toml_writer = writeStreamFixedDepth(depth, out_stream);
     defer toml_writer.deinit();
     try toml_writer.write(value);
 }
@@ -18,38 +28,89 @@ pub fn serializeKeyValue(
     out_stream: anytype,
     key: []const u8,
     value: anytype,
-) (@TypeOf(out_stream).Error || SerializeError)!void {
-    var toml_writer = writeStream(allocator, out_stream);
+) (@TypeOf(out_stream).Error || SerializeError || Allocator.Error)!void {
+    var toml_writer = writeStreamArbitraryDepth(allocator, out_stream);
     defer toml_writer.deinit();
     try toml_writer.writeKeyValue(key, value);
 }
 
-pub fn writeStream(
+pub fn serializeKeyValueFixedDepth(
+    comptime depth: usize,
+    out_stream: anytype,
+    key: []const u8,
+    value: anytype,
+) (@TypeOf(out_stream).Error || SerializeError)!void {
+    var toml_writer = writeStreamFixedDepth(depth, out_stream);
+    defer toml_writer.deinit();
+    try toml_writer.writeKeyValue(key, value);
+}
+
+pub fn writeStreamFixedDepth(
+    comptime depth: usize,
+    out_stream: anytype,
+) WriteStream(@TypeOf(out_stream), .{ .fixed = depth }) {
+    return WriteStream(
+        @TypeOf(out_stream),
+        .{ .fixed = depth },
+    ).init(
+        undefined,
+        out_stream,
+    );
+}
+
+pub fn writeStreamArbitraryDepth(
     allocator: Allocator,
     out_stream: anytype,
-) WriteStream(@TypeOf(out_stream)) {
-    return .{
-        .stream = out_stream,
-        .key_stack = std.ArrayList([]const u8).init(allocator),
-    };
+) WriteStream(@TypeOf(out_stream), .arbitrary) {
+    return WriteStream(@TypeOf(out_stream), .arbitrary).init(
+        allocator,
+        out_stream,
+    );
 }
 
 pub const SerializeError = error{
     NoKey,
     NotRepresentable,
+    /// Can only occur if the WriteStream in use is not arbitrary depth
+    /// (This is basically OutOfMemory in that case)
+    MaxDepthReached,
 };
 
-pub fn WriteStream(comptime OutStream: type) type {
+pub fn WriteStream(
+    comptime OutStream: type,
+    comptime max_depth: union(enum) {
+        arbitrary,
+        fixed: usize,
+    },
+) type {
     return struct {
         const Self = @This();
 
-        const Error = OutStream.Error || SerializeError;
+        const Error = switch (max_depth) {
+            .arbitrary => OutStream.Error || SerializeError || Allocator.Error,
+            .fixed => OutStream.Error || SerializeError,
+        };
 
         stream: OutStream,
 
-        key_stack: std.ArrayList([]const u8),
+        key_stack: switch (max_depth) {
+            .arbitrary => std.ArrayList([]const u8),
+            .fixed => |depth| [depth]?[]const u8,
+        },
+        stack_pointer: usize,
 
         array_depth: usize = 0,
+
+        pub fn init(key_allocator: Allocator, stream: OutStream) Self {
+            return .{
+                .stream = stream,
+                .stack_pointer = 0,
+                .key_stack = switch (max_depth) {
+                    .arbitrary => std.ArrayList([]const u8).init(key_allocator),
+                    .fixed => |depth| [_]?[]const u8{null} ** depth,
+                },
+            };
+        }
 
         pub fn writeKeyValue(self: *Self, key: []const u8, value: anytype) Error!void {
             try self.pushKey(key);
@@ -154,8 +215,6 @@ pub fn WriteStream(comptime OutStream: type) type {
         fn writeInline(self: *Self, value: anytype) Error!void {
             const T = @TypeOf(value);
 
-            // TODO: custom inline function e.g. for datetimes
-
             return switch (@typeInfo(T)) {
                 .Int => |info| {
                     if (info.bits > 64) {
@@ -257,12 +316,37 @@ pub fn WriteStream(comptime OutStream: type) type {
             }
         }
 
-        fn pushKey(self: *Self, key: []const u8) !void {
-            try self.key_stack.append(key);
+        fn pushKey(self: *Self, key: []const u8) Error!void {
+            switch (max_depth) {
+                .arbitrary => try self.key_stack.append(key),
+                .fixed => {
+                    if (self.stack_pointer == self.key_stack.len) return error.MaxDepthReached;
+                    self.key_stack[self.stack_pointer] = key;
+                },
+            }
+            self.stack_pointer += 1;
         }
 
         fn popKey(self: *Self) void {
-            _ = self.key_stack.pop();
+            switch (max_depth) {
+                .arbitrary => _ = self.key_stack.pop(),
+                .fixed => {},
+            }
+            self.stack_pointer -= 1;
+        }
+
+        /// Returns a reference to the key at the given position.
+        ///
+        /// Prefer this over accessing the key-stack directly, as this abstracts over
+        /// the comptime distinction between fixed and arbitrary depth.
+        ///
+        /// NOTE: This assumes the index to be valid and might
+        ///       return a null pointer if this is fixed-depth(and safety checks are off)
+        fn getKey(self: *const Self, index: usize) []const u8 {
+            return switch (max_depth) {
+                .arbitrary => self.key_stack.items[index],
+                .fixed => self.key_stack[index].?,
+            };
         }
 
         fn writeKey(self: *Self, key: []const u8) Error!void {
@@ -288,14 +372,15 @@ pub fn WriteStream(comptime OutStream: type) type {
         }
 
         fn writeAssignment(self: *Self) Error!void {
-            if (self.key_stack.items.len == 0) return error.NoKey;
-            try self.writeKey(self.key_stack.getLast());
+            if (self.stack_pointer == 0) return error.NoKey;
+
+            try self.writeKey(self.getKey(self.stack_pointer - 1));
             try self.stream.writeAll(" = ");
         }
 
         pub fn beginTable(self: *Self) Error!void {
             // this is the root table
-            if (self.key_stack.items.len == 0) return;
+            if (self.stack_pointer == 0) return;
 
             if (self.array_depth > 0) {
                 try self.stream.writeAll("[[");
@@ -304,11 +389,11 @@ pub fn WriteStream(comptime OutStream: type) type {
             }
 
             var i: usize = 0;
-            while (i < self.key_stack.items.len - 1) : (i += 1) {
-                try self.writeKey(self.key_stack.items[i]);
-                try self.stream.writeAll(".");
+            while (i < self.stack_pointer - 1) : (i += 1) {
+                try self.writeKey(self.getKey(i));
+                try self.stream.writeByte('.');
             }
-            try self.writeKey(self.key_stack.items[i]);
+            try self.writeKey(self.getKey(self.stack_pointer - 1));
 
             if (self.array_depth > 0) {
                 try self.stream.writeAll("]]");
@@ -320,7 +405,7 @@ pub fn WriteStream(comptime OutStream: type) type {
         }
 
         pub fn deinit(self: *Self) void {
-            self.key_stack.deinit();
+            if (max_depth == .arbitrary) self.key_stack.deinit();
 
             self.* = undefined;
         }
@@ -352,12 +437,6 @@ fn testWriteStream(value: anytype, key: ?[]const u8, expected: []const u8) !void
 
     var writer = buffer.writer();
 
-    var stream = WriteStream(@TypeOf(writer)){
-        .stream = writer,
-        .key_stack = std.ArrayList([]const u8).init(testing.allocator),
-    };
-    defer stream.deinit();
-
     if (key) |payload| {
         try serializeKeyValue(testing.allocator, writer, payload, value);
     } else {
@@ -373,10 +452,7 @@ fn testWriteStreamFailure(value: anytype, key: ?[]const u8, err: anyerror) !void
 
     var writer = buffer.writer();
 
-    var stream = WriteStream(@TypeOf(writer)){
-        .stream = writer,
-        .key_stack = std.ArrayList([]const u8).init(testing.allocator),
-    };
+    var stream = writeStreamArbitraryDepth(testing.allocator, writer);
     defer stream.deinit();
 
     if (key) |payload| {
@@ -615,4 +691,60 @@ test "encode tomlz table" {
 test "encode correctly quote keys" {
     try testWriteStream(42, "ASCII_encoded-key42", "ASCII_encoded-key42 = 42\n");
     try testWriteStream(42, "mr🐢turtle", "\"mr🐢turtle\" = 42\n");
+}
+
+test "test write stream fixed depth" {
+    {
+        var buffer = std.ArrayList(u8).init(testing.allocator);
+        defer buffer.deinit();
+
+        var writer = buffer.writer();
+
+        try serializeKeyValueFixedDepth(2, writer, "mykey", .{ .one = 1, .two = 2, .three = 3 });
+
+        try testing.expectEqualStrings(
+            \\[mykey]
+            \\one = 1
+            \\two = 2
+            \\three = 3
+            \\
+        , buffer.items);
+    }
+    {
+        var buffer = std.ArrayList(u8).init(testing.allocator);
+        defer buffer.deinit();
+
+        var writer = buffer.writer();
+
+        var stream = writeStreamFixedDepth(2, writer);
+        defer stream.deinit();
+
+        var result = stream.writeKeyValue("mykey", .{
+            .one = 1,
+            .child = .{ // oh no!
+                .two = 2,
+            },
+        });
+
+        try testing.expectError(error.MaxDepthReached, result);
+    }
+}
+
+test "works at comptime?" {
+    comptime {
+        var alloc_buffer = [_]u8{0} ** 32;
+        var fba = std.heap.FixedBufferAllocator.init(&alloc_buffer);
+        var alloc = fba.allocator();
+
+        var buffer = std.ArrayList(u8).init(alloc);
+        defer buffer.deinit();
+
+        var writer = buffer.writer();
+
+        try serializeKeyValueFixedDepth(1, writer, "key", "value");
+
+        if (!std.mem.eql(u8, alloc_buffer[0..14], "key = \"value\"\n")) {
+            @compileLog("WriteStream no longer works at comptime. expected 'key = \"value\"\n' found '" ++ alloc_buffer ++ "'(includes garbage data, ignore all \\x00)");
+        }
+    }
 }
