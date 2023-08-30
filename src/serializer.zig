@@ -3,16 +3,53 @@ const ascci = std.ascii;
 
 const Allocator = std.mem.Allocator;
 
+/// Serialize a value to the given out_stream.
+///
+/// Use this when you want to write a struct as the root table. When serializing
+/// e.g. a number use `serializeKeyValue` instead, because in that case a key is required.
+///
+/// For a fixed-depth version that doesn't require an allocator, see `serializeFixedDepth`.
+///
+/// # Example
+/// ```
+/// const std = @import("std")
+/// const tomlz = @import("tomlz");
+///
+/// var gpa_instance = std.heap.GeneralPurposeAllocator(.{}){};
+/// defer _ = gpa_instance.deinit();
+///
+/// const point = .{
+///     .x=4,
+///     .y=2,
+/// };
+///
+/// try tomlz.serialize(
+///     gpa_instance.allocator(),
+///     std.io.getStdOut().writer(),
+///     point,
+/// );
+///
+/// // Output:
+/// // x = 4
+/// // y = 2
+/// ````
 pub fn serialize(
     allocator: Allocator,
     out_stream: anytype,
     value: anytype,
 ) (@TypeOf(out_stream).Error || SerializeError || Allocator.Error)!void {
-    var toml_writer = writeStreamArbitraryDepth(allocator, out_stream);
+    var toml_writer = writeStream(allocator, out_stream);
     defer toml_writer.deinit();
     try toml_writer.write(value);
 }
 
+/// Same as `serialize`, except does not require an allocator.
+///
+/// The `depth` is the maximum amount of nested tables the writer can handle.
+/// A struct with just numbers as fields has depth 1. As soon as one of those fields
+/// is a struct itself, the depth is 2 and so on.
+/// For most use cases a max-depth like 64 or even 32 should be enough, but as it isn't completely universal
+/// its not the default.
 pub fn serializeFixedDepth(
     comptime depth: usize,
     out_stream: anytype,
@@ -23,17 +60,49 @@ pub fn serializeFixedDepth(
     try toml_writer.write(value);
 }
 
+/// Serialize a key-value pair to the given out_stream.
+///
+/// If you want to write a struct as the root table, see `serialize`.
+///
+/// For a fixed-depth version that doesn't require an allocator, see `serializeKeyValueFixedDepth`.
+/// # Example
+/// ```
+/// const std = @import("std")
+/// const tomlz = @import("tomlz");
+///
+/// var gpa_instance = std.heap.GeneralPurposeAllocator(.{}){};
+/// defer _ = gpa_instance.deinit();
+///
+/// const mynumber = 42;
+///
+/// try tomlz.serializeKeyValue(
+///     gpa_instance.allocator(),
+///     std.io.getStdOut().writer(),
+///     "some_key",
+///     mynumber
+/// );
+///
+/// // Output:
+/// // mynumber = 42
+/// ````
 pub fn serializeKeyValue(
     allocator: Allocator,
     out_stream: anytype,
     key: []const u8,
     value: anytype,
 ) (@TypeOf(out_stream).Error || SerializeError || Allocator.Error)!void {
-    var toml_writer = writeStreamArbitraryDepth(allocator, out_stream);
+    var toml_writer = writeStream(allocator, out_stream);
     defer toml_writer.deinit();
     try toml_writer.writeKeyValue(key, value);
 }
 
+/// Same as `serializeKeyValue`, except does not require an allocator.
+///
+/// The `depth` is the maximum amount of nested tables the writer can handle.
+/// A struct with just numbers as fields has depth 1. As soon as one of those fields
+/// is a struct itself, the depth is 2 and so on.
+/// For most use cases a max-depth like 64 or even 32 should be enough, but as it isn't completely universal
+/// its not the default.
 pub fn serializeKeyValueFixedDepth(
     comptime depth: usize,
     out_stream: anytype,
@@ -43,6 +112,16 @@ pub fn serializeKeyValueFixedDepth(
     var toml_writer = writeStreamFixedDepth(depth, out_stream);
     defer toml_writer.deinit();
     try toml_writer.writeKeyValue(key, value);
+}
+
+pub fn writeStream(
+    allocator: Allocator,
+    out_stream: anytype,
+) WriteStream(@TypeOf(out_stream), .arbitrary) {
+    return WriteStream(@TypeOf(out_stream), .arbitrary).init(
+        allocator,
+        out_stream,
+    );
 }
 
 pub fn writeStreamFixedDepth(
@@ -58,19 +137,8 @@ pub fn writeStreamFixedDepth(
     );
 }
 
-pub fn writeStreamArbitraryDepth(
-    allocator: Allocator,
-    out_stream: anytype,
-) WriteStream(@TypeOf(out_stream), .arbitrary) {
-    return WriteStream(@TypeOf(out_stream), .arbitrary).init(
-        allocator,
-        out_stream,
-    );
-}
-
 pub const SerializeError = error{
     NoKey,
-    NotRepresentable,
     /// Can only occur if the WriteStream in use is not arbitrary depth
     /// (This is basically OutOfMemory in that case)
     MaxDepthReached,
@@ -91,20 +159,48 @@ pub fn WriteStream(
             .fixed => OutStream.Error || SerializeError,
         };
 
-        stream: OutStream,
+        out_stream: OutStream,
 
+        /// Keeps track of all the sub-keys making up the current key.
+        ///
+        /// To properly write a tables key, we also need to know all previous keys
+        /// that have led us to the current one(e.g. "tomlz.is.awesome", "awesome" being the key of the current table).
+        /// Every time we write a value to a key, we also push that key onto the key-stack so
+        /// we can later still find it. If we're done writing the value we pop the key again.
+        ///
+        /// Technically we'd only need to do this when actually writing a table or an array of tables
+        /// but for simplicity's sake we always do it, even if just writing a number.
+        ///
+        /// If this is a fixed-depth Writer we also use an array instead of an arraylist to
+        /// remove the need for an allocator. This comes with the disadvantage of a writer of depth 4
+        /// not being able to handle a key like "one.two.three.four.five".
+        ///
+        /// Does NOT own the actual sub-keys, only holds pointers to them!
         key_stack: switch (max_depth) {
             .arbitrary => std.ArrayList([]const u8),
             .fixed => |depth| [depth]?[]const u8,
         },
-        stack_pointer: usize,
 
+        /// Points to the top of the key-stack plus 1(the next free slot)
+        ///
+        /// This is required in case of a fixed-depth writer, but is also updated
+        /// for arbitrary-depth writers for more readable code.
+        stack_pointer: usize = 0,
+
+        /// Counts the number of tables we have descended into within an array.
+        ///
+        /// If a table is inside an array, its key needs to be in double parentheses.
+        /// The array needs to relay this information to its children, and also needs to "turn it off"
+        /// when done. A simple flag would not be able to effectively represent this, because in the case
+        /// that one of those children has another array of tables as a field, that array might deactivate the
+        /// flag too early. Recursion could have handled this with a flag, but custom serialize functions
+        /// would have had to pass that along and that would have been ugly.
         array_depth: usize = 0,
 
-        pub fn init(key_allocator: Allocator, stream: OutStream) Self {
+        /// Create a new WriteStream. If this is fixed-depth, key_allocator can be undefined.
+        pub fn init(key_allocator: Allocator, out_stream: OutStream) Self {
             return .{
-                .stream = stream,
-                .stack_pointer = 0,
+                .out_stream = out_stream,
                 .key_stack = switch (max_depth) {
                     .arbitrary => std.ArrayList([]const u8).init(key_allocator),
                     .fixed => |depth| [_]?[]const u8{null} ** depth,
@@ -112,12 +208,24 @@ pub fn WriteStream(
             };
         }
 
+        /// Write a value to a key. If you want to write a struct as the root table,
+        /// see `write` instead.
+        ///
+        /// Does NOT take ownership of the key.
+        ///
+        /// Convenience wrapper around
+        /// ```
+        /// pushKey()
+        /// write()
+        /// popKey()
+        /// ```
         pub fn writeKeyValue(self: *Self, key: []const u8, value: anytype) Error!void {
             try self.pushKey(key);
+            defer self.popKey();
             try self.write(value);
-            self.popKey();
         }
 
+        /// Writes a value without a key, only works for tables. See `writeKeyValue` otherwise.
         pub fn write(self: *Self, value: anytype) Error!void {
             const T = @TypeOf(value);
 
@@ -131,9 +239,9 @@ pub fn WriteStream(
                 .EnumLiteral,
                 .ErrorSet,
                 => {
-                    try self.writeAssignment();
+                    try self.beginAssignment();
                     try self.writeInline(value);
-                    try self.stream.writeByte('\n');
+                    try self.out_stream.writeByte('\n');
                 },
                 .Optional => {
                     if (value) |payload| {
@@ -183,9 +291,9 @@ pub fn WriteStream(
                         const slice = if (ptr_info.size == .Many) std.mem.span(value) else value;
 
                         if (comptime canInline(T)) {
-                            try self.writeAssignment();
+                            try self.beginAssignment();
                             try self.writeInline(slice);
-                            try self.stream.writeByte('\n');
+                            try self.out_stream.writeByte('\n');
                             return;
                         }
 
@@ -197,7 +305,7 @@ pub fn WriteStream(
 
                         self.array_depth -= 1;
                     },
-                    else => @compileError("Unable to stringify type '" ++ @typeName(T) ++ "'."),
+                    else => @compileError("Unable to serialize type '" ++ @typeName(T) ++ "'."),
                 },
                 .Array => {
                     // Coerce `[N]T` to `*const [N]T` (and then to `[]const T`).
@@ -212,31 +320,33 @@ pub fn WriteStream(
             };
         }
 
+        /// Writes "raw" values, e.g. "5" instead of "value = 5"
         fn writeInline(self: *Self, value: anytype) Error!void {
             const T = @TypeOf(value);
 
             return switch (@typeInfo(T)) {
                 .Int => |info| {
                     if (info.bits > 64) {
-                        return error.NotRepresentable;
+                        @compileError("Unable to serialize type '" ++ @typeName(T) ++ "'.");
                     }
 
-                    return self.stream.print("{}", .{value});
+                    return self.out_stream.print("{}", .{value});
+                },
+                .Float => |info| {
+                    if (info.bits > 64) {
+                        @compileError("Unable to serialize type '" ++ @typeName(T) ++ "'.");
+                    }
+
+                    return self.out_stream.print("{}", .{value});
                 },
                 .ComptimeInt => return self.writeInline(@as(std.math.IntFittingRange(value, value), value)),
-                .Float, .ComptimeFloat => {
-                    if (@as(f64, @floatCast(value)) != value) {
-                        return error.NotRepresentable;
-                    }
-
-                    return self.stream.print("{}", .{value});
-                },
-                .Bool => return self.stream.print("{}", .{value}),
+                .ComptimeFloat => return self.out_stream.print("{}", .{value}),
+                .Bool => return self.out_stream.print("{}", .{value}),
 
                 .Enum, .EnumLiteral => {
-                    return self.stream.print("\"{s}\"", .{@tagName(value)});
+                    return self.out_stream.print("\"{s}\"", .{@tagName(value)});
                 },
-                .ErrorSet => return self.stream.print("\"{s}\"", .{@errorName(value)}),
+                .ErrorSet => return self.out_stream.print("\"{s}\"", .{@errorName(value)}),
                 .Array => {
                     // Coerce `[N]T` to `*const [N]T` (and then to `[]const T`).
                     return self.writeInline(&value);
@@ -263,19 +373,19 @@ pub fn WriteStream(
 
                         // This is a []const u8, or some similar Zig string.
                         if (ptr_info.child == u8 and std.unicode.utf8ValidateSlice(slice)) {
-                            return self.stream.print("\"{s}\"", .{value});
+                            return self.out_stream.print("\"{s}\"", .{value});
                         }
 
-                        try self.stream.writeByte('[');
+                        try self.out_stream.writeByte('[');
 
                         var i: usize = 0;
                         while (i < slice.len - 1) : (i += 1) {
                             try self.writeInline(slice[i]);
-                            try self.stream.writeAll(", ");
+                            try self.out_stream.writeAll(", ");
                         }
 
                         try self.writeInline(slice[i]);
-                        try self.stream.writeByte(']');
+                        try self.out_stream.writeByte(']');
                     },
                     else => @compileError("Inlining value of type '" ++ @typeName(T) ++ "' is not supported"),
                 },
@@ -301,9 +411,9 @@ pub fn WriteStream(
                 if (comptime !canInline(Field.type)) continue;
 
                 try self.pushKey(Field.name);
-                try self.writeAssignment();
+                try self.beginAssignment();
                 try self.writeInline(@field(value, Field.name));
-                try self.stream.writeByte('\n');
+                try self.out_stream.writeByte('\n');
                 self.popKey();
             }
 
@@ -316,7 +426,7 @@ pub fn WriteStream(
             }
         }
 
-        fn pushKey(self: *Self, key: []const u8) Error!void {
+        pub fn pushKey(self: *Self, key: []const u8) Error!void {
             switch (max_depth) {
                 .arbitrary => try self.key_stack.append(key),
                 .fixed => {
@@ -327,7 +437,7 @@ pub fn WriteStream(
             self.stack_pointer += 1;
         }
 
-        fn popKey(self: *Self) void {
+        pub fn popKey(self: *Self) void {
             switch (max_depth) {
                 .arbitrary => _ = self.key_stack.pop(),
                 .fixed => {},
@@ -335,23 +445,24 @@ pub fn WriteStream(
             self.stack_pointer -= 1;
         }
 
-        /// Returns a reference to the key at the given position.
+        /// Returns a reference to the sub-key at the given position.
         ///
         /// Prefer this over accessing the key-stack directly, as this abstracts over
         /// the comptime distinction between fixed and arbitrary depth.
         ///
         /// NOTE: This assumes the index to be valid and might
         ///       return a null pointer if this is fixed-depth(and safety checks are off)
-        fn getKey(self: *const Self, index: usize) []const u8 {
+        fn getSubKey(self: *const Self, index: usize) []const u8 {
             return switch (max_depth) {
                 .arbitrary => self.key_stack.items[index],
                 .fixed => self.key_stack[index].?,
             };
         }
 
-        fn writeKey(self: *Self, key: []const u8) Error!void {
+        /// Writes a single sub-key, correctly escaping it if it is non-bare
+        fn writeSubKey(self: *Self, sub_key: []const u8) Error!void {
             var is_bare = true;
-            for (key) |char| {
+            for (sub_key) |char| {
                 if (ascci.isAlphanumeric(char)) continue;
 
                 if (char != '_' and char != '-') {
@@ -361,49 +472,67 @@ pub fn WriteStream(
             }
 
             if (!is_bare) {
-                try self.stream.writeByte('"');
+                try self.out_stream.writeByte('"');
             }
 
-            try self.stream.writeAll(key);
+            try self.out_stream.writeAll(sub_key);
 
             if (!is_bare) {
-                try self.stream.writeByte('"');
+                try self.out_stream.writeByte('"');
             }
         }
 
-        fn writeAssignment(self: *Self) Error!void {
+        /// Writes the beginning of an assignment, e.g. "mykey = ".
+        ///
+        /// There are only two cases where you want to use this
+        ///  1. You have multiple values you want to write as a single one, e.g. concatenating
+        ///     two strings. Call this, then use the underlying `out_stream` aferwards.
+        ///
+        ///  2. Implement a date-time serializer, because in that case you dont want
+        ///     to surround your value with quotation marks.
+        ///
+        /// Everything else should be handled by `write` and `writeKeyValue`.
+        pub fn beginAssignment(self: *Self) Error!void {
             if (self.stack_pointer == 0) return error.NoKey;
 
-            try self.writeKey(self.getKey(self.stack_pointer - 1));
-            try self.stream.writeAll(" = ");
+            try self.writeSubKey(self.getSubKey(self.stack_pointer - 1));
+            try self.out_stream.writeAll(" = ");
         }
 
+        /// Write a table header. You only need to bother with this when implementing a custom
+        /// serialize function.
+        ///
+        /// Automatically handles enclosing the key in double parentheses if inside
+        /// an array.
         pub fn beginTable(self: *Self) Error!void {
             // this is the root table
             if (self.stack_pointer == 0) return;
 
             if (self.array_depth > 0) {
-                try self.stream.writeAll("[[");
+                try self.out_stream.writeAll("[[");
             } else {
-                try self.stream.writeByte('[');
+                try self.out_stream.writeByte('[');
             }
 
             var i: usize = 0;
             while (i < self.stack_pointer - 1) : (i += 1) {
-                try self.writeKey(self.getKey(i));
-                try self.stream.writeByte('.');
+                try self.writeSubKey(self.getSubKey(i));
+                try self.out_stream.writeByte('.');
             }
-            try self.writeKey(self.getKey(self.stack_pointer - 1));
+            try self.writeSubKey(self.getSubKey(self.stack_pointer - 1));
 
             if (self.array_depth > 0) {
-                try self.stream.writeAll("]]");
+                try self.out_stream.writeAll("]]");
             } else {
-                try self.stream.writeByte(']');
+                try self.out_stream.writeByte(']');
             }
 
-            try self.stream.writeByte('\n');
+            try self.out_stream.writeByte('\n');
         }
 
+        // If this is an arbitrary-depth writer, frees the key-stack.
+        //
+        // Does NOT free the keys themselves.
         pub fn deinit(self: *Self) void {
             if (max_depth == .arbitrary) self.key_stack.deinit();
 
@@ -452,7 +581,7 @@ fn testWriteStreamFailure(value: anytype, key: ?[]const u8, err: anyerror) !void
 
     var writer = buffer.writer();
 
-    var stream = writeStreamArbitraryDepth(testing.allocator, writer);
+    var stream = writeStream(testing.allocator, writer);
     defer stream.deinit();
 
     if (key) |payload| {
@@ -471,6 +600,7 @@ test "encode basic types" {
 
     // floats
     try testWriteStream(@as(f64, 13.37), "value", "value = 1.337e+01\n");
+    try testWriteStream(13.37, "value", "value = 1.337e+01\n");
     // unrepresentable floats fail at compile time
 
     // bools
@@ -730,7 +860,7 @@ test "test write stream fixed depth" {
     }
 }
 
-test "works at comptime?" {
+test "encoding works at comptime" {
     comptime {
         var alloc_buffer = [_]u8{0} ** 32;
         var fba = std.heap.FixedBufferAllocator.init(&alloc_buffer);
