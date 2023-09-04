@@ -1,12 +1,15 @@
 # tomlz
 A TOML parser for Zig targeting TOML v1.0.0, an easy API and safety.
+Also supports encoding/serializing values(implemented by @0x5a4)!
 
 ```zig
+const std = @import("std")
+const tomlz = @import("tomlz")
+
 var gpa = std.heap.page_allocator;
-var table = try parser.parse(gpa,
+var table = try tomlz.parse(gpa,
     \\foo = 1
     \\bar = 2
-
 );
 defer table.deinit(gpa);
 
@@ -15,10 +18,19 @@ table.getInteger("foo").?; // 1
 
 // --- or ---
 const S = struct { foo: i64, bar: i64 };
-const s = try parser.decode(S, gpa,
+const s = try tomlz.decode(S, gpa,
   \\foo = 1
   \\bar = 2
 );
+
+// serialize a value like this (also see the examples)
+try tomlz.serialize(
+    gpa, 
+    std.io.getStdout.writer()
+    s,
+);
+// foo = 1
+// bar = 2
 ```
 
 ## Current status
@@ -30,6 +42,13 @@ whitespace between the square brackets of an array header).
 We allow both parsing into a special TOML type, a `Table`, but also support
 decoding into a struct directly - including types that must be allocated like
 arrays and strings.
+
+The Serializer allows encoding every kind of zig type, overwriting it's default behaviour
+by implementing a function called `tomlzSerialize`, has the option to work
+without an allocator and can therefore even work at `comptime`! 
+Note that for some types like `std.HashMap` its not possible to just encode
+all their fields, so custom logic is needed. We can't provide this, but it's not
+too difficult to implement it yourself(See examples).
 
 ## Installation
 tomlz supports being included as a module.
@@ -73,8 +92,11 @@ We currently provide a single entry point for parsing which returns a toml
 `Table` type. This type has helper methods for getting values out:
 
 ```zig
+const std = @import("std");
+const tomlz = @import("tomlz");
+
 var gpa = std.heap.page_allocator;
-var table = try parser.parse(gpa,
+var table = try tomlz.parse(gpa,
     \\int = 1
     \\float = 2.0
     \\boolean = true
@@ -97,6 +119,9 @@ A simple example is
 
 ### Decode
 ```zig
+const std = @import("std");
+const tomlz = @import("tomlz");
+
 var gpa = std.heap.page_allocator;
 const TripleCrowns = struct { worlds: i64, masters: i64, uks: i64 };
 
@@ -130,7 +155,7 @@ const Game = struct {
     }
 };
 
-var s = try parser.decode(Game, gpa,
+var s = try tomlz.decode(Game, gpa,
     \\name = "snooker"
     \\
     \\[goat]
@@ -145,6 +170,9 @@ var s = try parser.decode(Game, gpa,
 );
 defer s.deinit(gpa);
 ```
+
+### Encode
+Have a look at [the example](examples/serialize/src/main.zig).
 
 ## Goals and non-goals
 Goals and non-goals are subject to change based on how the project is used and
