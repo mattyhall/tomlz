@@ -366,6 +366,22 @@ test "decode array of tables" {
     try testing.expectEqualSlices(B, &.{ .{ .a = 147 }, .{ .a = 1 } }, s.foo.bar);
 }
 
+test "decode default value" {
+    const S = struct {
+        a: []const u8 = "hello world",
+        b: i32 = 147,
+        c: bool = false,
+    };
+
+    var s = try parser.decode(S, testing.allocator,
+        \\c = true
+    );
+
+    try testing.expectEqualStrings("hello world", s.a);
+    try testing.expectEqual(@as(i32, 147), s.b);
+    try testing.expect(s.c);
+}
+
 // toml2json tests
 
 test "snooker" {

@@ -364,10 +364,12 @@ fn decodeTable(comptime T: anytype, gpa: std.mem.Allocator, table: Table) Decodi
     inline for (ti.Struct.fields) |f| {
         const f_ti = @typeInfo(f.type);
         if (!table.contains(f.name)) {
-            if (f_ti != .Optional)
-                return DecodingError.MissingField
-            else
-                @field(strct, f.name) = null;
+            if (f_ti == .Optional)
+                @field(strct, f.name) = null
+            else if (f.default_value) |default_ptr| {
+                const default = @as(*align(1) const f.type, @ptrCast(default_ptr)).*;
+                @field(strct, f.name) = default;
+            } else return DecodingError.MissingField;
         } else {
             var v = table.table.get(f.name).?;
             @field(strct, f.name) = try decodeValue(f.type, gpa, v);
