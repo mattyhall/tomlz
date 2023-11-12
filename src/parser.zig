@@ -754,7 +754,8 @@ pub const Parser = struct {
         };
     }
 
-    /// parseTableHeader parses "[<key>]\n" which specifies the next assignments should be in the table defined by <key>
+    /// parseTableHeader parses "[<key>]" followed either by EOF, which creates an empty table, or a new line, in which case
+    /// the next assignments should be in the table defined by <key>
     ///
     /// NOTE: Assumes "[" has already been parsed
     fn parseTableHeader(self: *Parser) !void {
@@ -783,7 +784,10 @@ pub const Parser = struct {
         self.current_table = &res.value.table;
 
         try self.expect(.close_square_bracket, "]");
-        try self.expect(.newline, "\n");
+        self.expect(.newline, "\n") catch |err| switch (err) {
+            error.EOF => return,
+            else => return err,
+        };
     }
 
     /// parseArrayHeaderKey parses the key inside an array header. It will ensure that all but the last key in the path
@@ -836,8 +840,8 @@ pub const Parser = struct {
         }
     }
 
-    /// parseArrayHeader parses "[[<key>]]\n" which specifies the next assignments should be in a table in the array
-    /// <key>. loc is the location of the second '['.
+    /// parseArrayHeader parses "[[<key>]]" followed either by EOF, which creates an empty table, or a new line, in which case
+    /// the next assignments should be in the table defined by <key>. loc is the location of the second '['.
     ///
     /// NOTE: Assumes "[[" has already been parsed
     fn parseArrayHeader(self: *Parser, loc: lex.Loc) !void {
@@ -876,7 +880,10 @@ pub const Parser = struct {
         }
 
         try self.expect(.close_square_bracket, "]");
-        try self.expect(.newline, "\n");
+        self.expect(.newline, "\n") catch |err| switch (err) {
+            error.EOF => return,
+            else => return err,
+        };
     }
 
     pub fn parse(self: *Parser) ParseError!Table {
@@ -1143,6 +1150,15 @@ test "table header" {
         try testing.expectEqual(@as(i64, 1), table.getTable("foo").?.getInteger("a").?);
         try testing.expectEqual(@as(i64, 2), table.getTable("bar").?.getInteger("b").?);
     }
+    
+    {
+        var table = try testParse(&.{
+            .open_square_bracket, .{ .key = "foo" }, .close_square_bracket,
+        });
+        defer table.deinit(testing.allocator);
+
+        try testing.expect(table.getTable("foo") != null);
+    }
     // zig fmt: on
 }
 
@@ -1294,6 +1310,15 @@ test "array of tables" {
         try testing.expectEqualStrings("a", arr.items()[0].table.getString("bar").?);
         const inner_table = arr.items()[0].table.getTable("baz").?;
         try testing.expectEqualStrings("b", inner_table.getString("bat").?);
+    }
+    
+    {
+        var table = try testParse(&.{
+            .open_square_bracket, .open_square_bracket, .{ .key = "foo" }, .close_square_bracket, .close_square_bracket,
+        });
+        defer table.deinit(testing.allocator);
+
+        try testing.expect(table.getArray("foo") != null);
     }
     // zig fmt: on
 }
