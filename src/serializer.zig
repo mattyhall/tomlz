@@ -249,13 +249,13 @@ pub fn WriteStream(
                     }
                 },
                 .Struct => {
-                    if (comptime std.meta.trait.hasFn("tomlzSerialize")(T)) {
+                    if (std.meta.hasFn(T, "tomlzSerialize")) {
                         return value.tomlzSerialize(self);
                     }
                     return self.writeTable(value);
                 },
                 .Union => {
-                    if (comptime std.meta.trait.hasFn("tomlzSerialize")(T)) {
+                    if (std.meta.hasFn(T, "tomlzSerialize")) {
                         return value.tomlzSerialize(self);
                     }
 
@@ -564,7 +564,7 @@ fn testWriteStream(value: anytype, key: ?[]const u8, expected: []const u8) !void
     var buffer = std.ArrayList(u8).init(testing.allocator);
     defer buffer.deinit();
 
-    var writer = buffer.writer();
+    const writer = buffer.writer();
 
     if (key) |payload| {
         try serializeKeyValue(testing.allocator, writer, payload, value);
@@ -579,7 +579,7 @@ fn testWriteStreamFailure(value: anytype, key: ?[]const u8, err: anyerror) !void
     var buffer = std.ArrayList(u8).init(testing.allocator);
     defer buffer.deinit();
 
-    var writer = buffer.writer();
+    const writer = buffer.writer();
 
     var stream = writeStream(testing.allocator, writer);
     defer stream.deinit();
@@ -599,8 +599,8 @@ test "encode basic types" {
     // unrepresentable integers fail at compile time
 
     // floats
-    try testWriteStream(@as(f64, 13.37), "value", "value = 1.337e+01\n");
-    try testWriteStream(13.37, "value", "value = 1.337e+01\n");
+    try testWriteStream(@as(f64, 13.37), "value", "value = 1.337e1\n");
+    try testWriteStream(13.37, "value", "value = 1.337e1\n");
     // unrepresentable floats fail at compile time
 
     // bools
@@ -828,7 +828,7 @@ test "test write stream fixed depth" {
         var buffer = std.ArrayList(u8).init(testing.allocator);
         defer buffer.deinit();
 
-        var writer = buffer.writer();
+        const writer = buffer.writer();
 
         try serializeKeyValueFixedDepth(2, writer, "mykey", .{ .one = 1, .two = 2, .three = 3 });
 
@@ -844,12 +844,12 @@ test "test write stream fixed depth" {
         var buffer = std.ArrayList(u8).init(testing.allocator);
         defer buffer.deinit();
 
-        var writer = buffer.writer();
+        const writer = buffer.writer();
 
         var stream = writeStreamFixedDepth(2, writer);
         defer stream.deinit();
 
-        var result = stream.writeKeyValue("mykey", .{
+        const result = stream.writeKeyValue("mykey", .{
             .one = 1,
             .child = .{ // oh no!
                 .two = 2,
@@ -864,12 +864,12 @@ test "encoding works at comptime" {
     comptime {
         var alloc_buffer = [_]u8{0} ** 32;
         var fba = std.heap.FixedBufferAllocator.init(&alloc_buffer);
-        var alloc = fba.allocator();
+        const alloc = fba.allocator();
 
         var buffer = std.ArrayList(u8).init(alloc);
         defer buffer.deinit();
 
-        var writer = buffer.writer();
+        const writer = buffer.writer();
 
         try serializeKeyValueFixedDepth(1, writer, "key", "value");
 

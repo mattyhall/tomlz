@@ -371,7 +371,7 @@ fn decodeTable(comptime T: anytype, gpa: std.mem.Allocator, table: Table) Decodi
                 @field(strct, f.name) = default;
             } else return DecodingError.MissingField;
         } else {
-            var v = table.table.get(f.name).?;
+            const v = table.table.get(f.name).?;
             @field(strct, f.name) = try decodeValue(f.type, gpa, v);
         }
     }
@@ -399,7 +399,7 @@ pub const Parser = struct {
     current_table: *Table,
 
     pub fn init(allocator: std.mem.Allocator, lexer: Lexer) AllocError!Parser {
-        var table = try allocator.create(Table);
+        const table = try allocator.create(Table);
         table.* = .{ .source = .top_level, .closed = false };
         return .{ .allocator = allocator, .lexer = lexer, .top_level_table = table, .current_table = table };
     }
@@ -438,7 +438,7 @@ pub const Parser = struct {
     /// parseKey parses a potentially nested (i.e. with dots in) key and inserts each key segment into al. It returns
     /// the location of the final key
     fn parseKey(self: *Parser, key: []const u8, loc: lex.Loc, al: *std.ArrayList([]const u8)) !lex.Loc {
-        var dup: []const u8 = try self.allocator.dupe(u8, key);
+        const dup: []const u8 = try self.allocator.dupe(u8, key);
         {
             errdefer self.allocator.free(dup);
             try al.append(dup);
@@ -476,7 +476,7 @@ pub const Parser = struct {
                 },
             };
 
-            var new_dup = try self.allocator.dupe(u8, key_s);
+            const new_dup = try self.allocator.dupe(u8, key_s);
             {
                 errdefer self.allocator.free(new_dup);
                 try al.append(new_dup);
@@ -486,7 +486,7 @@ pub const Parser = struct {
 
     fn parseValue(self: *Parser) ParseError!Value {
         const tokloc = try self.pop(false);
-        var val = switch (tokloc.tok) {
+        const val = switch (tokloc.tok) {
             .string => |s| Value{ .string = try self.allocator.dupe(u8, s) },
             .integer => |i| Value{ .integer = i },
             .float => |f| Value{ .float = f },
@@ -655,8 +655,8 @@ pub const Parser = struct {
                     return error.KeyAlreadyExists;
                 }
 
-                var val = tbl.table.getPtr(k) orelse b: {
-                    var dup = try self.allocator.dupe(u8, k);
+                const val = tbl.table.getPtr(k) orelse b: {
+                    const dup = try self.allocator.dupe(u8, k);
                     errdefer self.allocator.free(dup);
 
                     try tbl.table.put(self.allocator, dup, .{ .integer = 0xaa });
@@ -692,7 +692,7 @@ pub const Parser = struct {
                     },
                 }
             } else {
-                var dup = try self.allocator.dupe(u8, k);
+                const dup = try self.allocator.dupe(u8, k);
                 errdefer self.allocator.free(dup);
                 tbl = try tbl.getOrPutTable(self.allocator, dup, .{ .source = source, .closed = false });
             }
@@ -710,7 +710,7 @@ pub const Parser = struct {
         }
 
         const new_loc = try self.parseKey(key, loc, &al);
-        var res = try self.createPath(al.items, new_loc, AllowOpts{ .exists = false, .closed = false }, .assignment);
+        const res = try self.createPath(al.items, new_loc, AllowOpts{ .exists = false, .closed = false }, .assignment);
 
         if (res.table.closed) {
             self.diag = .{ .msg = "table already exists", .loc = loc };
@@ -722,7 +722,7 @@ pub const Parser = struct {
             return error.KeyAlreadyExists;
         }
 
-        var val = res.value;
+        const val = res.value;
 
         try self.expect(.equals, "=");
 
@@ -964,10 +964,10 @@ fn toksToLocToks(toks: []const lex.Tok) AllocError![]lex.TokLoc {
 
 /// testParse takes the given toks and parses them into a table
 fn testParse(toks: []const lex.Tok) ParseError!Table {
-    var toklocs = try toksToLocToks(toks);
+    const toklocs = try toksToLocToks(toks);
     defer testing.allocator.free(toklocs);
 
-    var lexer = Lexer{ .fake = .{ .toklocs = toklocs } };
+    const lexer = Lexer{ .fake = .{ .toklocs = toklocs } };
 
     var parser = try Parser.init(testing.allocator, lexer);
     defer parser.deinit();
@@ -980,7 +980,7 @@ fn expectEqualTables(expected: Table, actual: Table) !void {
 
     var it = expected.table.iterator();
     while (it.next()) |entry| {
-        var value = actual.table.get(entry.key_ptr.*);
+        const value = actual.table.get(entry.key_ptr.*);
         try testing.expect(value != null);
         try testing.expectEqual(std.meta.activeTag(entry.value_ptr.*), std.meta.activeTag(value.?));
 
@@ -1010,10 +1010,10 @@ fn expectEqualParses(toks: []const lex.Tok, expected: []const KV) !void {
 
 /// expectErrorParse asserts that trying to parse toks gives err
 fn expectErrorParse(err: anyerror, toks: []const lex.Tok) !void {
-    var toklocs = try toksToLocToks(toks);
+    const toklocs = try toksToLocToks(toks);
     defer testing.allocator.free(toklocs);
 
-    var lexer = Lexer{ .fake = .{ .toklocs = toklocs } };
+    const lexer = Lexer{ .fake = .{ .toklocs = toklocs } };
     var parser = try Parser.init(testing.allocator, lexer);
     defer parser.deinit();
 
@@ -1059,12 +1059,12 @@ test "dotted assignment" {
     {
         var table = try testParse(&.{ .{ .key = "foo"}, .dot, .{ .key = "bar" }, .equals, .{ .string = "a" }});
         defer table.deinit(testing.allocator);
-        
+
         try testing.expectEqualStrings("a", table.getTable("foo").?.getString("bar").?);
     }
 
     {
-        var table = try testParse(&.{ 
+        var table = try testParse(&.{
             .{ .key = "foo"}, .dot, .{ .key = "bar" }, .equals, .{ .string = "a" }, .newline,
             .{ .key = "foo"}, .dot, .{ .key = "baz" }, .equals, .{ .string = "b" }, .newline,
         });
@@ -1074,7 +1074,7 @@ test "dotted assignment" {
     }
 
     {
-        var table = try testParse(&.{ 
+        var table = try testParse(&.{
             .{ .key = "foo"}, .dot, .{ .key = "bar" }, .equals, .{ .string = "a" }, .newline,
             .{ .key = "foo"}, .dot, .{ .string = "baz baz" }, .equals, .{ .string = "b" }, .newline,
         });
@@ -1095,7 +1095,7 @@ test "fail: dotted assignment" {
 test "table header" {
     // zig fmt: off
     {
-        var table = try testParse(&.{ 
+        var table = try testParse(&.{
             .open_square_bracket, .{ .key="foo" }, .close_square_bracket, .newline,
             .{ .key = "bar"}, .equals, .{ .string = "a" }, .newline,
             .{ .key = "baz" }, .equals, .{ .string = "b" }, .newline,
@@ -1106,11 +1106,11 @@ test "table header" {
     }
 
     {
-        var table = try testParse(&.{ 
+        var table = try testParse(&.{
             .open_square_bracket, .{ .key="foo" }, .close_square_bracket, .newline,
             .{ .key = "bar"}, .equals, .{ .string = "a" }, .newline,
-            .newline, 
-            .newline, 
+            .newline,
+            .newline,
             .newline,
             .{ .key = "baz" }, .equals, .{ .string = "b" }, .newline,
         });
@@ -1120,14 +1120,14 @@ test "table header" {
     }
 
     {
-        var table = try testParse(&.{ 
+        var table = try testParse(&.{
             .open_square_bracket, .{ .key="foo" }, .dot, .{.key = "bar"}, .close_square_bracket, .newline,
             .{ .key = "baz" }, .equals, .{ .string = "a" }, .newline,
             .{ .key = "bat" }, .equals, .{ .string = "b" }, .newline,
         });
         defer table.deinit(testing.allocator);
         try testing.expectEqualStrings(
-            "a", 
+            "a",
             table.getTable("foo").?.getTable("bar").?.getString("baz").?);
         try testing.expectEqualStrings(
             "b",
@@ -1135,7 +1135,7 @@ test "table header" {
     }
 
     {
-        var table = try testParse(&.{ 
+        var table = try testParse(&.{
             .open_square_bracket, .{ .key="foo" }, .close_square_bracket, .newline,
             .{ .key = "a"}, .equals, .{ .integer = 1 }, .newline,
             .open_square_bracket, .{ .key="bar" }, .close_square_bracket, .newline,
@@ -1156,8 +1156,8 @@ test "fail: table header" {
 test "inline array" {
     // zig fmt: off
     {
-        var table = try testParse(&.{.{ .key = "foo" }, .equals, 
-            .open_square_bracket, 
+        var table = try testParse(&.{.{ .key = "foo" }, .equals,
+            .open_square_bracket,
                 .{ .integer = 1 }, .comma, .{ .integer = 2 },
             .close_square_bracket });
         defer table.deinit(testing.allocator);
@@ -1166,18 +1166,18 @@ test "inline array" {
     }
 
     {
-        var table = try testParse(&.{.{ .key = "foo" }, .equals, 
-            .open_square_bracket, 
+        var table = try testParse(&.{.{ .key = "foo" }, .equals,
+            .open_square_bracket,
                 .{ .integer = 1 }, .newline, .newline, .comma, .newline, .{ .integer = 2 },
             .close_square_bracket });
         defer table.deinit(testing.allocator);
 
         try testing.expectEqualSlices(Value,  &.{ .{ .integer = 1 }, .{ .integer = 2 }}, table.getArray("foo").?.items());
     }
-    
+
     {
-        var table = try testParse(&.{.{ .key = "foo" }, .equals, 
-            .open_square_bracket, 
+        var table = try testParse(&.{.{ .key = "foo" }, .equals,
+            .open_square_bracket,
                 .{ .integer = 1 }, .comma, .{ .string = "bar" },
             .close_square_bracket });
         defer table.deinit(testing.allocator);
@@ -1189,16 +1189,16 @@ test "inline array" {
     }
 
     {
-        var table = try testParse(&.{.{ .key = "foo" }, .equals, 
-            .open_square_bracket, 
-                .{ .integer = 1 }, .comma, 
+        var table = try testParse(&.{.{ .key = "foo" }, .equals,
+            .open_square_bracket,
+                .{ .integer = 1 }, .comma,
                 .open_square_bracket, .{ .integer = 2 }, .comma, .{ .integer = 3 }, .close_square_bracket,
             .close_square_bracket });
         defer table.deinit(testing.allocator);
 
         try testing.expectEqual(@as(usize, 2), table.getArray("foo").?.items().len);
         try testing.expectEqual(Value{ .integer = 1}, table.getArray("foo").?.items()[0]);
-        try testing.expectEqualSlices(Value, 
+        try testing.expectEqualSlices(Value,
             &.{ .{ .integer = 2 }, .{ .integer = 3 }},
             table.getArray("foo").?.items()[1].array.items());
 
@@ -1215,7 +1215,7 @@ test "fail: inline array" {
 test "arrays" {
     // zig fmt: off
     {
-        var table = try testParse(&.{ 
+        var table = try testParse(&.{
             .open_square_bracket, .open_square_bracket, .{ .key="foo" }, .close_square_bracket, .close_square_bracket, .newline,
             .{ .key = "bar"}, .equals, .{ .string = "a" }, .newline,
 
@@ -1231,14 +1231,14 @@ test "arrays" {
     }
 
     {
-        var table = try testParse(&.{ 
-            .open_square_bracket, .open_square_bracket, 
-                .{ .key="foo" }, .dot, .{ .key = "bar" }, 
+        var table = try testParse(&.{
+            .open_square_bracket, .open_square_bracket,
+                .{ .key="foo" }, .dot, .{ .key = "bar" },
             .close_square_bracket, .close_square_bracket, .newline,
             .{ .key = "a"}, .equals, .{ .integer = 1 }, .newline,
 
-            .open_square_bracket, .open_square_bracket, 
-                .{ .key="foo" }, .dot, .{ .key = "bar" }, 
+            .open_square_bracket, .open_square_bracket,
+                .{ .key="foo" }, .dot, .{ .key = "bar" },
             .close_square_bracket, .close_square_bracket, .newline,
             .{ .key = "b" }, .equals, .{ .integer = 2 }, .newline,
         });
@@ -1315,7 +1315,7 @@ test "fail: array of tables" {
 test "inline tables" {
     // zig fmt: off
     {
-        var table = try testParse(&.{ 
+        var table = try testParse(&.{
             .{ .key = "foo" }, .equals, .open_curly_brace,
                 .{ .key = "bar"}, .equals, .{ .string = "a" }, .comma,
                 .{ .key = "baz" }, .equals, .{ .string = "b" },
@@ -1327,14 +1327,14 @@ test "inline tables" {
     }
 
     {
-        var table = try testParse(&.{ 
+        var table = try testParse(&.{
             .{ .key = "foo" }, .equals, .open_curly_brace,
                 .{ .key = "bar"}, .dot, .{ .key = "baz"}, .equals, .{ .string = "a" },
             .close_curly_brace,
         });
         defer table.deinit(testing.allocator);
         try testing.expectEqualStrings(
-            "a", 
+            "a",
             table.getTable("foo").?.getTable("bar").?.getString("baz").?);
     }
     // zig fmt: on

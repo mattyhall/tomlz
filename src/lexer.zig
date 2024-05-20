@@ -71,7 +71,7 @@ pub const Lexer = struct {
         if (!std.unicode.utf8ValidateSlice(src))
             return error.NotUTF8;
 
-        var arena = std.heap.ArenaAllocator.init(allocator);
+        const arena = std.heap.ArenaAllocator.init(allocator);
         return Lexer{ .arena = arena, .source = src, .loc = .{ .line = 1, .col = 1 }, .diag = null, .index = 0 };
     }
 
@@ -157,7 +157,7 @@ pub const Lexer = struct {
     /// parseEscapeChar parses the valid escape codes allowed in TOML (i.e. those allowed in a string beginning with a
     /// backslash)
     fn parseEscapeChar(self: *Lexer, al: *std.ArrayListUnmanaged(u8)) Error!void {
-        var c: u8 = switch (try self.peek()) {
+        const c: u8 = switch (try self.peek()) {
             'b' => 8,
             't' => '\t',
             'n' => '\n',
@@ -413,7 +413,7 @@ pub const Lexer = struct {
 
             if (c == '\r') {
                 _ = self.pop() catch unreachable;
-                var p = self.peek() catch |err| switch (err) {
+                const p = self.peek() catch |err| switch (err) {
                     error.EOF => {
                         self.diag = .{ .msg = "expected \\n after \\r", .loc = self.loc };
                         return error.UnexpectedChar;
@@ -549,7 +549,7 @@ pub const Lexer = struct {
             _ = self.pop() catch unreachable;
         }
 
-        var slice = self.source[original_index..self.index];
+        const slice = self.source[original_index..self.index];
         if (slice[slice.len - 1] == '.') {
             self.diag = .{ .msg = "trailing dot not allowed", .loc = self.loc };
             return error.UnexpectedChar;
@@ -602,7 +602,7 @@ pub const Lexer = struct {
     /// NOTE: any memory returned in TokLoc (e.g. the []const u8 array in a key/string) is only valid until the next
     /// call of next
     pub fn next(self: *Lexer, force_key: bool) Error!?TokLoc {
-        var child = self.arena.child_allocator;
+        const child = self.arena.child_allocator;
 
         self.arena.deinit();
         self.arena = std.heap.ArenaAllocator.init(child);
@@ -698,7 +698,7 @@ fn readAllTokens(src: []const u8) ![]const Tok {
 }
 
 fn testTokens(src: []const u8, expected: []const Tok) !void {
-    var toks = try readAllTokens(src);
+    const toks = try readAllTokens(src);
     defer {
         for (toks) |tok| {
             tok.deinit(testing.allocator);
