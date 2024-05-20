@@ -45,8 +45,8 @@ fn jsonValueEquality(actual: *const std.json.Value, expected: *const std.json.Va
 
 pub fn jsonEquality(gpa: std.mem.Allocator, actual: *const std.json.Value, expected: *const std.json.Value) !bool {
     if (expected.* == .object and expected.object.contains("type")) {
-        var t = expected.object.get("type") orelse unreachable;
-        var s = expected.object.get("value") orelse unreachable;
+        const t = expected.object.get("type") orelse unreachable;
+        const s = expected.object.get("value") orelse unreachable;
 
         if (std.mem.eql(u8, t.string, "string")) {
             if (actual.* != .string) return false;
@@ -75,8 +75,8 @@ pub fn jsonEquality(gpa: std.mem.Allocator, actual: *const std.json.Value, expec
 
     switch (actual.*) {
         .array => {
-            var arr_actual = actual.array.items;
-            var arr_expected = expected.array.items;
+            const arr_actual = actual.array.items;
+            const arr_expected = expected.array.items;
             if (arr_actual.len != arr_expected.len) return false;
 
             for (arr_actual, 0..) |value_a, i| {
@@ -168,7 +168,7 @@ fn testFile(dir: *const std.fs.Dir, basename: []const u8) !parser.Table {
     var f = try dir.openFile(basename, .{});
     defer f.close();
 
-    var contents = try f.reader().readAllAlloc(testing.allocator, 5 * 1024 * 1024);
+    const contents = try f.reader().readAllAlloc(testing.allocator, 5 * 1024 * 1024);
     defer testing.allocator.free(contents);
 
     return try parser.parse(testing.allocator, contents);
@@ -177,7 +177,7 @@ fn testFile(dir: *const std.fs.Dir, basename: []const u8) !parser.Table {
 fn testInvalid(dir: *const std.fs.Dir, path: []const u8, basename: []const u8) !bool {
     for (failing_invalid_tests) |skip_path| if (std.mem.eql(u8, path, skip_path)) return false;
 
-    var full_path = try dir.realpathAlloc(testing.allocator, basename);
+    const full_path = try dir.realpathAlloc(testing.allocator, basename);
     defer testing.allocator.free(full_path);
 
     var tbl = testFile(dir, basename) catch return false;
@@ -190,7 +190,7 @@ fn testInvalid(dir: *const std.fs.Dir, path: []const u8, basename: []const u8) !
 fn testValid(dir: *const std.fs.Dir, path: []const u8, basename: []const u8) !bool {
     for (failing_valid_tests) |skip_path| if (std.mem.eql(u8, path, skip_path)) return false;
 
-    var full_path = try dir.realpathAlloc(testing.allocator, basename);
+    const full_path = try dir.realpathAlloc(testing.allocator, basename);
     defer testing.allocator.free(full_path);
 
     var tbl = testFile(dir, basename) catch |err| {
@@ -206,12 +206,12 @@ fn testValid(dir: *const std.fs.Dir, path: []const u8, basename: []const u8) !bo
 
     var json_path = try testing.allocator.dupe(u8, basename);
     defer testing.allocator.free(json_path);
-    std.mem.copy(u8, json_path[basename.len - 4 ..], "json");
+    std.mem.copyForwards(u8, json_path[basename.len - 4 ..], "json");
 
     var f = try dir.openFile(json_path, .{});
     defer f.close();
 
-    var contents = try f.reader().readAllAlloc(testing.allocator, 5 * 1024 * 1024);
+    const contents = try f.reader().readAllAlloc(testing.allocator, 5 * 1024 * 1024);
     defer testing.allocator.free(contents);
 
     var expected = try std.json.parseFromSlice(std.json.Value, testing.allocator, contents, .{});
@@ -228,7 +228,7 @@ fn testValid(dir: *const std.fs.Dir, path: []const u8, basename: []const u8) !bo
 // standard tests
 
 test "invalid" {
-    var dir = try std.fs.cwd().makeOpenPathIterable("tests/invalid", .{});
+    var dir = try std.fs.cwd().makeOpenPath("tests/invalid", .{});
     defer dir.close();
 
     var fail = false;
@@ -245,7 +245,7 @@ test "invalid" {
 }
 
 test "valid" {
-    var dir = try std.fs.cwd().makeOpenPathIterable("tests/valid", .{});
+    var dir = try std.fs.cwd().makeOpenPath("tests/valid", .{});
     defer dir.close();
 
     var fail = false;
@@ -265,7 +265,7 @@ test "valid" {
 // fuzz error case tests
 
 test "fuzz" {
-    var dir = try std.fs.cwd().makeOpenPathIterable("tests/fuzzing", .{});
+    var dir = try std.fs.cwd().makeOpenPath("tests/fuzzing", .{});
     defer dir.close();
 
     var walker = try dir.walk(testing.allocator);
@@ -273,13 +273,13 @@ test "fuzz" {
     while (try walker.next()) |entry| {
         if (entry.kind != .file) continue;
 
-        var full_path = try entry.dir.realpathAlloc(testing.allocator, entry.basename);
+        const full_path = try entry.dir.realpathAlloc(testing.allocator, entry.basename);
         defer testing.allocator.free(full_path);
 
         var f = try entry.dir.openFile(full_path, .{});
         defer f.close();
 
-        var contents = try f.reader().readAllAlloc(testing.allocator, 5 * 1024 * 1024);
+        const contents = try f.reader().readAllAlloc(testing.allocator, 5 * 1024 * 1024);
         defer testing.allocator.free(contents);
 
         // We just want to make sure we don't crash when parsing these
@@ -299,7 +299,7 @@ test "decode simple" {
         f2: f64,
     };
 
-    var s = try parser.decode(S, testing.allocator,
+    const s = try parser.decode(S, testing.allocator,
         \\b = false
         \\i1 = 147
         \\i2 = 14
@@ -313,7 +313,7 @@ test "decode simple" {
 test "decode optional" {
     const S = struct { a: i64, b: ?bool };
 
-    var s = try parser.decode(S, testing.allocator, "a = 147");
+    const s = try parser.decode(S, testing.allocator, "a = 147");
 
     try testing.expectEqual(S{ .a = 147, .b = null }, s);
 }
@@ -323,7 +323,7 @@ test "decode array of ints" {
         vals: []const i64,
     };
 
-    var s = try parser.decode(S, testing.allocator, "vals = [1, 2, 3, 4, 5]");
+    const s = try parser.decode(S, testing.allocator, "vals = [1, 2, 3, 4, 5]");
     defer testing.allocator.free(s.vals);
 
     try testing.expectEqualSlices(i64, &.{ 1, 2, 3, 4, 5 }, s.vals);
@@ -334,7 +334,7 @@ test "decode array of strings" {
         vals: []const []const u8,
     };
 
-    var s = try parser.decode(S, testing.allocator,
+    const s = try parser.decode(S, testing.allocator,
         \\vals = ["hello", ", ", "world"]
     );
     defer {
@@ -353,7 +353,7 @@ test "decode array of tables" {
     const F = struct { bar: []const B };
     const S = struct { foo: F };
 
-    var s = try parser.decode(S, testing.allocator,
+    const s = try parser.decode(S, testing.allocator,
         \\[[foo.bar]]
         \\a = 147
         \\[[foo.bar]]
@@ -373,7 +373,7 @@ test "decode default value" {
         c: bool = false,
     };
 
-    var s = try parser.decode(S, testing.allocator,
+    const s = try parser.decode(S, testing.allocator,
         \\c = true
     );
 
@@ -706,7 +706,7 @@ test "fruits" {
         \\name = "banana"
         \\
         \\[[fruits.varieties]]
-        \\name = "plantain"    
+        \\name = "plantain"
     ,
         \\{
         \\    "fruits": [

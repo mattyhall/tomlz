@@ -16,7 +16,7 @@ pub fn main() !void {
     const data = try stdin.readToEndAlloc(allocator, std.math.maxInt(usize));
     defer allocator.free(data);
 
-    var lexer = parser.Lexer{ .real = try lex.Lexer.init(allocator, data) };
+    const lexer = parser.Lexer{ .real = try lex.Lexer.init(allocator, data) };
     var p = try parser.Parser.init(allocator, lexer);
     defer p.deinit();
 

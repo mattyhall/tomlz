@@ -1,6 +1,6 @@
 const std = @import("std");
 
-pub fn build(b: *std.build.Builder) !void {
+pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
@@ -12,7 +12,7 @@ pub fn build(b: *std.build.Builder) !void {
     });
     b.installArtifact(lib);
 
-    _ = b.addModule("tomlz", .{ .source_file = .{ .path = "src/main.zig" } });
+    _ = b.addModule("tomlz", .{ .root_source_file = .{ .path = "src/main.zig" } });
 
     const main_tests = b.addTest(.{
         .root_source_file = .{ .path = "src/main.zig" },
@@ -25,7 +25,11 @@ pub fn build(b: *std.build.Builder) !void {
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&run_main_tests.step);
 
-    const fuzz_exe = b.addExecutable(.{ .name = "fuzz", .root_source_file = .{ .path = "src/fuzz.zig" } });
+    const fuzz_exe = b.addExecutable(.{
+        .name = "fuzz",
+        .root_source_file = .{ .path = "src/fuzz.zig" },
+        .target = target,
+    });
     fuzz_exe.linkLibC();
     b.installArtifact(fuzz_exe);
     const fuzz_compile_run = b.step("fuzz", "Build executable for fuzz testing afl-fuzz");
