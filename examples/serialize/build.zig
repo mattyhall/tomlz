@@ -1,6 +1,6 @@
 const std = @import("std");
 
-pub fn build(b: *std.build.Builder) void {
+pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
@@ -13,10 +13,10 @@ pub fn build(b: *std.build.Builder) void {
 
     // If we have the project in our repository then we can just add it as a module
     const tomlz = b.addModule("tomlz", .{
-        .source_file = .{ .path = "../../src/main.zig" },
+        .root_source_file = .{ .path = "../../src/main.zig" },
     });
 
-    exe.addModule("tomlz", tomlz);
+    exe.root_module.addImport("tomlz", tomlz);
 
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
