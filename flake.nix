@@ -12,20 +12,13 @@
       url = "github:mitchellh/zig-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    zls = {
-      url = "github:erikarvstedt/zls/fix-nix";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
   };
 
-  outputs = {self, nixpkgs, flake-utils, flake-compat, zig, zls}:
+  outputs = {self, nixpkgs, flake-utils, flake-compat, zig}:
     let
       overlays = [
         (final: prev: {
           zigpkgs = zig.packages.${prev.system};
-        })
-        (final: prev: {
-          zlspkgs = zls.packages.${prev.system};
         })
       ];
       systems = builtins.attrNames zig.packages;
@@ -37,8 +30,8 @@
           rec {
             devShell = pkgs.mkShell {
               buildInputs = (with pkgs; [
-                zigpkgs.master-2023-10-30
-                zlspkgs.default
+                zigpkgs."0.12.0"
+                zls
                 bashInteractive
                 gdb
                 lldb
