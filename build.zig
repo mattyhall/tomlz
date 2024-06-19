@@ -6,16 +6,16 @@ pub fn build(b: *std.Build) !void {
 
     const lib = b.addStaticLibrary(.{
         .name = "tomlz",
-        .root_source_file = .{ .path = "src/main.zig" },
+        .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
     b.installArtifact(lib);
 
-    _ = b.addModule("tomlz", .{ .root_source_file = .{ .path = "src/main.zig" } });
+    _ = b.addModule("tomlz", .{ .root_source_file = b.path("src/main.zig") });
 
     const main_tests = b.addTest(.{
-        .root_source_file = .{ .path = "src/main.zig" },
+        .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -27,7 +27,7 @@ pub fn build(b: *std.Build) !void {
 
     const fuzz_exe = b.addExecutable(.{
         .name = "fuzz",
-        .root_source_file = .{ .path = "src/fuzz.zig" },
+        .root_source_file = b.path("src/fuzz.zig"),
         .target = target,
     });
     fuzz_exe.linkLibC();

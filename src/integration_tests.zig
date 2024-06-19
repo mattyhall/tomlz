@@ -228,7 +228,7 @@ fn testValid(dir: *const std.fs.Dir, path: []const u8, basename: []const u8) !bo
 // standard tests
 
 test "invalid" {
-    var dir = try std.fs.cwd().makeOpenPath("tests/invalid", .{});
+    var dir = try std.fs.cwd().makeOpenPath("tests/invalid", .{.iterate = true});
     defer dir.close();
 
     var fail = false;
@@ -245,7 +245,7 @@ test "invalid" {
 }
 
 test "valid" {
-    var dir = try std.fs.cwd().makeOpenPath("tests/valid", .{});
+    var dir = try std.fs.cwd().makeOpenPath("tests/valid", .{.iterate = true});
     defer dir.close();
 
     var fail = false;
@@ -265,7 +265,7 @@ test "valid" {
 // fuzz error case tests
 
 test "fuzz" {
-    var dir = try std.fs.cwd().makeOpenPath("tests/fuzzing", .{});
+    var dir = try std.fs.cwd().makeOpenPath("tests/fuzzing", .{.iterate = true});
     defer dir.close();
 
     var walker = try dir.walk(testing.allocator);
