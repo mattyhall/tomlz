@@ -373,7 +373,33 @@ pub fn WriteStream(
 
                         // This is a []const u8, or some similar Zig string.
                         if (ptr_info.child == u8 and std.unicode.utf8ValidateSlice(slice)) {
-                            return self.out_stream.print("\"{s}\"", .{value});
+                            try self.out_stream.writeByte('"');
+
+                            for (value) |byte| {
+                                switch (byte) {
+                                    // u08 and u09
+                                    8 => try self.out_stream.writeAll("\\b"),
+                                    '\t' => try self.out_stream.writeAll("\\t"),
+                                    // u0A to u0D
+                                    '\n' => try self.out_stream.writeAll("\\n"),
+                                    '\x0B' => try self.out_stream.writeAll("\\u000B"),
+                                    '\x0C' => try self.out_stream.writeAll("\\f"),
+                                    '\r' => try self.out_stream.writeAll("\\r"),
+                                    // other control characters
+                                    '\x0E'...'\x1F' => try self.out_stream.print("\\u{x:0>4}", .{byte}),
+                                    // u22
+                                    '\\' => try self.out_stream.writeAll("\\\\"),
+                                    // u5C
+                                    '"' => try self.out_stream.writeAll("\""),
+                                    '\x7F' => try self.out_stream.writeAll("\\u007F"),
+
+                                    else => try self.out_stream.writeByte(byte),
+                                }
+                            }
+
+                            try self.out_stream.writeByte('"');
+
+                            return;
                         }
 
                         try self.out_stream.writeByte('[');
@@ -620,9 +646,24 @@ test "encode basic types" {
 
     // optionals
     try testWriteStream(@as(?u16, 42), "value", "value = 42\n");
+}
 
-    // strings
+test "encode strings" {
     try testWriteStream("test", "value", "value = \"test\"\n");
+
+    // test that backslashes are escaped
+    try testWriteStream("test\\", "value", "value = \"test\\\\\"\n");
+
+    // test that escape codes arent written as is
+    try testWriteStream("test\n", "value", "value = \"test\\n\"\n");
+    try testWriteStream("test\t", "value", "value = \"test\\t\"\n");
+    try testWriteStream("test\r", "value", "value = \"test\\r\"\n");
+
+    // test control characters are written as unicode literals
+    try testWriteStream("test\x10", "value", "value = \"test\\u0010\"\n");
+
+    // test windows path
+    try testWriteStream("D:\\Projects\\output\\Runner.exe", "exe_path", "exe_path = \"D:\\\\Projects\\\\output\\\\Runner.exe\"\n");
 }
 
 test "encode arrays" {
